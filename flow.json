@@ -1,0 +1,30 @@
+{
+  "start": "main",
+  "triggers": ["menu", "menú", "inicio", "volver", "hola", "buenas"],
+  "nodes": {
+    "main": {
+      "type": "menu",
+      "message": "¡Hola! 👋 Soy el asistente. ¿En qué te puedo ayudar?",
+      "options": [
+        { "key": "1", "label": "Ventas", "next": "ventas" },
+        { "key": "2", "label": "Soporte técnico", "next": "soporte" },
+        { "key": "3", "label": "Hablar con la IA", "next": "ia" }
+      ]
+    },
+    "ventas": {
+      "type": "ai",
+      "message": "📦 *Ventas*. Cuéntame qué producto o servicio te interesa y te ayudo. (Escribe *menú* para volver)",
+      "systemAddon": "El usuario está en el área de Ventas. Ayúdale con información comercial, precios y productos de forma amable."
+    },
+    "soporte": {
+      "type": "ai",
+      "message": "🛠️ *Soporte técnico*. Describe tu problema y te ayudo a resolverlo. (Escribe *menú* para volver)",
+      "systemAddon": "El usuario está en Soporte técnico. Ayúdale a diagnosticar y resolver su problema paso a paso."
+    },
+    "ia": {
+      "type": "ai",
+      "message": "🤖 Listo, pregúntame lo que quieras. (Escribe *menú* para volver al inicio)",
+      "systemAddon": ""
+    }
+  }
+}

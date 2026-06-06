@@ -1,0 +1,46 @@
+# ============================================================
+#  Despliegue del Chatbot + PostgreSQL con Docker Compose
+#  Uso:  docker compose up -d --build
+# ============================================================
+services:
+  # Base de datos (memoria del bot)
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatbot-postgres
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres}
+      POSTGRES_DB: ${PG_DATABASE:-chatbot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # El chatbot
+  chatbot:
+    build: .
+    container_name: chatbot-app
+    env_file: .env
+    environment:
+      # Dentro de Docker, la BD se llama "postgres" (nombre del servicio)
+      PG_HOST: postgres
+      PORT: "3000"
+      # Persistir conocimiento y flujo en la carpeta montada ./data
+      KNOWLEDGE_FILE: data/knowledge.md
+      FLOW_FILE: data/flow.json
+      CONV_STORE_FILE: data/conversations.json
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

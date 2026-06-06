@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(php --version)",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const OpenAI=require\\('openai'\\); const o=new OpenAI\\({apiKey:process.env.OPENAI_API_KEY}\\); o.chat.completions.create\\({model:process.env.OPENAI_MODEL,messages:[{role:'user',content:'Responde solo con: OK funciona'}]}\\).then\\(r=>console.log\\('✅ OpenAI respondio:',r.choices[0].message.content\\)\\).catch\\(e=>console.error\\('❌ Error:',e.message\\)\\);\")",
+      "Bash(break)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

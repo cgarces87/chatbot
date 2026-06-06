@@ -1,0 +1,12 @@
+# No copiar a la imagen:
+node_modules
+data
+*.log
+.git
+.gitignore
+.env
+.env.example
+test-doc.*
+qr.png
+chatbot-*
+_IGNORE_*

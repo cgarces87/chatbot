@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel del Chatbot · Pronetsys</title>
+  <style>
+    :root {
+      --brand: #144086; --brand-dark: #0e2f63; --brand-accent: #1e5bb8;
+      --bg: #f4f6fb; --card: #ffffff; --border: #e5e9f2; --text: #1f2937; --muted: #6b7280;
+      --soft: #f1f5fb; --danger: #dc2626; --ok: #16a34a; --warn: #d97706;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); }
+
+    .layout { display: flex; min-height: 100vh; }
+
+    /* Sidebar */
+    .sidebar { width: 240px; flex-shrink: 0; background: var(--brand); color: #fff; display: flex; flex-direction: column; }
+    .sidebar .brand { padding: 18px 18px 14px; border-bottom: 1px solid rgba(255,255,255,.12); }
+    .sidebar .brand img { height: 26px; }
+    nav { padding: 10px 0; flex: 1; overflow-y: auto; }
+    nav a { display: flex; align-items: center; gap: 10px; padding: 12px 18px; color: #cdd9ee; cursor: pointer; font-size: 14px; border-left: 3px solid transparent; }
+    nav a:hover { background: rgba(255,255,255,.08); color: #fff; }
+    nav a.active { background: rgba(255,255,255,.15); color: #fff; border-left-color: #fff; font-weight: 600; }
+    .logout { margin: 10px 16px 16px; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .logout:hover { background: rgba(255,255,255,.25); }
+
+    /* Main */
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 20; }
+    .topbar h1 { font-size: 18px; margin: 0; color: var(--brand); }
+    #menuToggle { display: none; background: var(--brand); color: #fff; border: none; border-radius: 8px; width: 38px; height: 38px; font-size: 18px; cursor: pointer; }
+    .content { padding: 24px; flex: 1; }
+    section[data-sec] { display: none; }
+    section[data-sec].active { display: block; }
+
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .card h2 { margin: 0 0 16px; font-size: 13px; color: var(--brand); text-transform: uppercase; letter-spacing: .6px; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+    .stat { background: var(--soft); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .stat .k { font-size: 12px; color: var(--muted); }
+    .stat .v { font-size: 18px; font-weight: 700; margin-top: 4px; word-break: break-all; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    .green { background: var(--ok); box-shadow: 0 0 6px rgba(22,163,74,.6); } .red { background: var(--danger); } .yellow { background: var(--warn); }
+
+    label { display: block; font-size: 13px; color: #374151; margin: 14px 0 6px; font-weight: 500; }
+    input, textarea, select { width: 100%; background: #f9fafb; border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--brand-accent); box-shadow: 0 0 0 3px rgba(30,91,184,.16); background: #fff; }
+    textarea { min-height: 90px; resize: vertical; }
+    button { background: var(--brand); color: white; border: none; border-radius: 8px; padding: 11px 20px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 18px; }
+    button:hover { background: var(--brand-dark); } button:disabled { opacity: .5; }
+    button.ghost { background: #fff; color: var(--brand); border: 1px solid var(--brand); margin-left: 10px; }
+    button.ghost:hover { background: var(--soft); }
+    .note { font-size: 11px; color: var(--warn); }
+    .msg { margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: 14px; display: none; }
+    .msg.ok { background: #f0fdf4; color: var(--ok); border: 1px solid #bbf7d0; display: block; }
+    .msg.err { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; display: block; }
+
+    .bars { display: flex; align-items: flex-end; gap: 6px; height: 80px; margin-top: 8px; }
+    .bar { flex: 1; background: var(--brand-accent); border-radius: 4px 4px 0 0; min-height: 3px; position: relative; }
+    .bar span { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--muted); }
+
+    .node { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin: 12px 0; background: var(--soft); }
+    .node-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .node-head b { color: var(--brand); font-size: 14px; }
+    .opt { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+    .opt input { flex: 2; } .opt select { flex: 1; }
+    .mini { padding: 6px 12px; font-size: 12px; margin-top: 8px; }
+    .mini.danger { background: #fff; color: var(--danger); border: 1px solid #fecaca; margin-top: 0; }
+    .mini.danger:hover { background: #fef2f2; }
+
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 40; }
+
+    /* Responsive */
+    @media (max-width: 860px) {
+      .sidebar { position: fixed; left: -240px; top: 0; bottom: 0; z-index: 50; transition: left .2s; }
+      .sidebar.open { left: 0; }
+      .overlay.show { display: block; }
+      #menuToggle { display: block; }
+      .content { padding: 16px; }
+      .card { padding: 16px; }
+      button.ghost { margin-left: 0; margin-top: 10px; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay" id="overlay"></div>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><img src="/logo.png" alt="Pronetsys" /></div>
+      <nav id="nav">
+        <a data-target="estado" data-label="Estado" class="active">📊 Estado</a>
+        <a data-target="flujo" data-label="Flujo conversacional">🧭 Flujo conversacional</a>
+        <a data-target="ignorados" data-label="Números ignorados">🚫 Ignorados</a>
+        <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
+      </nav>
+      <button class="logout" id="logoutBtn">Cerrar sesión</button>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <button id="menuToggle">☰</button>
+        <h1 id="pageTitle">Estado</h1>
+      </div>
+      <div class="content" id="content">
+        <!-- Estado -->
+        <section data-sec="estado" class="active">
+          <div class="card" id="pauseCard">
+            <h2>Control del bot</h2>
+            <div id="pauseState" style="font-size:15px;margin-bottom:4px">—</div>
+            <button id="pauseBtn">Cargando…</button>
+            <button id="restartBtn" class="ghost">🔄 Reiniciar bot</button>
+            <p style="font-size:12px;color:var(--muted);margin:12px 0 0">
+              Al pausarlo, el bot deja de responder automáticamente para que <b>tú atiendas los chats directamente</b>. Reanúdalo cuando termines.
+            </p>
+          </div>
+          <div class="card">
+            <h2>Estado en vivo</h2>
+            <div class="grid" id="status"><div class="stat"><div class="k">Cargando…</div></div></div>
+          </div>
+          <div class="card">
+            <h2>Métricas (últimos 7 días)</h2>
+            <div id="metrics">—</div>
+          </div>
+        </section>
+
+        <!-- Flujo -->
+        <section data-sec="flujo">
+          <div class="card">
+            <h2>Flujo conversacional (menús)</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 8px">
+              Tipo <b>menu</b> = muestra opciones; tipo <b>ai</b> = chat libre con IA. Actívalo en "Comportamiento → Activar flujo de menús".
+            </p>
+            <div id="flowEditor">Cargando…</div>
+            <button type="button" id="saveFlowBtn">💾 Guardar flujo</button>
+            <div class="msg" id="flowMsg"></div>
+          </div>
+        </section>
+        <!-- Números ignorados -->
+        <section data-sec="ignorados">
+          <div class="card">
+            <h2>Números / chats ignorados</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 12px">
+              El bot <b>no responde</b> a estos. Útil para bots de monitoreo, notificaciones automáticas o spam.
+            </p>
+            <div id="ignoredList">Cargando…</div>
+            <label>Agregar (número o ID de chat)</label>
+            <div style="display:flex;gap:8px;align-items:flex-start">
+              <input id="ignoredInput" placeholder="ej: 207593721069658  o  573001234567" style="flex:1">
+              <button id="ignoredAddBtn" type="button" style="margin-top:0">Agregar</button>
+            </div>
+            <div class="msg" id="ignoredMsg"></div>
+          </div>
+          <div class="card">
+            <h2>Conversaciones recientes</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 8px">Toca "Ignorar" para silenciar a alguien rápidamente.</p>
+            <div id="recentList">—</div>
+          </div>
+        </section>
+
+        <!-- Base de conocimiento -->
+        <section data-sec="conocimiento">
+          <div class="card">
+            <h2>Base de conocimiento</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 12px">
+              Pega aquí la información que el bot debe usar para responder: <b>precios, productos, horarios, políticas, preguntas frecuentes…</b> El bot la tendrá en cuenta en <b>cada</b> respuesta. (Puedes copiar el texto de tus documentos aquí.)
+            </p>
+            <textarea id="knowledgeText" style="min-height:320px;font-family:inherit" placeholder="Ej:&#10;PRECIOS&#10;- Plan básico: $50.000/mes&#10;- Plan pro: $90.000/mes&#10;&#10;HORARIOS: Lunes a viernes 8am-6pm&#10;DIRECCIÓN: Calle 1 #2-3&#10;&#10;PREGUNTAS FRECUENTES&#10;- ¿Hacen envíos? Sí, a todo el país."></textarea>
+            <button type="button" id="saveKnowledgeBtn">💾 Guardar conocimiento</button>
+
+            <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+              <label>O sube un documento (.txt o .pdf) — se agrega al texto de arriba</label>
+              <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+                <input type="file" id="knowledgeFile" accept=".txt,.md,.pdf" style="flex:1;min-width:180px">
+                <button type="button" class="ghost" id="uploadKnowledgeBtn" style="margin-top:0">⬆️ Subir documento</button>
+              </div>
+            </div>
+            <div class="msg" id="knowledgeMsg"></div>
+          </div>
+        </section>
+
+        <!-- Secciones de configuración se agregan aquí dinámicamente -->
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const esc = (s) => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const fmtUptime = (sec) => { sec = Math.floor(sec); const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60; return (h?h+'h ':'')+(m?m+'m ':'')+s+'s'; };
+    const slug = (g) => g.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    const ICONS = { 'Comportamiento':'⚙️', 'Conexiones':'🔌', 'Base de datos':'🐘', 'Exposicion a internet':'🌐', 'Exposición a internet':'🌐' };
+
+    // ---- Navegación entre secciones ----
+    function activar(secId) {
+      document.querySelectorAll('section[data-sec]').forEach(s => s.classList.toggle('active', s.dataset.sec === secId));
+      document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.target === secId));
+      const item = document.querySelector(`#nav a[data-target="${secId}"]`);
+      if (item) $('#pageTitle').textContent = item.dataset.label;
+      if (secId === 'ignorados') cargarIgnorados();
+      if (secId === 'conocimiento') cargarConocimientoPanel();
+      cerrarMenu();
+    }
+    document.getElementById('nav').addEventListener('click', (e) => {
+      const a = e.target.closest('a'); if (a) activar(a.dataset.target);
+    });
+    function abrirMenu() { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); }
+    function cerrarMenu() { $('#sidebar').classList.remove('open'); $('#overlay').classList.remove('show'); }
+    $('#menuToggle').addEventListener('click', abrirMenu);
+    $('#overlay').addEventListener('click', cerrarMenu);
+
+    // ---- Estado ----
+    async function cargarEstado() {
+      try {
+        const r = await fetch('/api/admin/status');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        if (!r.ok) throw new Error('error ' + r.status);
+        const d = await r.json();
+        pintarPausa(d.paused);
+        const ses = d.session || {}, st = d.storage || {};
+        $('#status').innerHTML = `
+          <div class="stat"><div class="k">Bot</div><div class="v"><span class="dot ${d.online?'green':'red'}"></span>${d.online?'Encendido':'Apagado'}</div></div>
+          <div class="stat"><div class="k">Encendido hace</div><div class="v">${fmtUptime(d.uptimeSec)}</div></div>
+          <div class="stat"><div class="k">Sesión WhatsApp</div><div class="v"><span class="dot ${ses.status==='ready'?'green':'yellow'}"></span>${ses.phone||'—'}</div></div>
+          <div class="stat"><div class="k">Webhook</div><div class="v"><span class="dot ${d.webhookActive?'green':'red'}"></span>${d.webhookActive?'Activo':'No'}</div></div>
+          <div class="stat"><div class="k">Atención humana</div><div class="v">🙋 ${d.humanHandling ?? 0} chat(s)</div></div>
+          <div class="stat"><div class="k">Memoria</div><div class="v"><span class="dot ${st.driver==='error'?'red':'green'}"></span>${st.driver||'?'}</div></div>
+          <div class="stat"><div class="k">Conversaciones</div><div class="v">${st.conversations ?? '—'}</div></div>
+          <div class="stat"><div class="k">Mensajes guardados</div><div class="v">${st.totalMessages ?? '—'}</div></div>
+          <div class="stat"><div class="k">Mensajes hoy</div><div class="v">${st.today ?? '—'}</div></div>
+          <div class="stat"><div class="k">Modelo OpenAI</div><div class="v">${d.model}</div></div>
+        `;
+        pintarMetricas(st.last7 || []);
+      } catch (e) {
+        $('#status').innerHTML = '<div class="stat"><div class="k">Error</div><div class="v red">'+e.message+'</div></div>';
+      }
+    }
+    function pintarPausa(paused) {
+      const st = $('#pauseState'), btn = $('#pauseBtn');
+      if (!st || !btn) return;
+      if (paused) {
+        st.innerHTML = '<span class="dot red"></span> <b>EN PAUSA</b> — el bot no responde, tú atiendes los chats';
+        btn.textContent = '▶️ Reanudar bot';
+        btn.style.background = 'var(--ok)';
+      } else {
+        st.innerHTML = '<span class="dot green"></span> <b>ACTIVO</b> — respondiendo automáticamente';
+        btn.textContent = '⏸️ Pausar bot';
+        btn.style.background = 'var(--warn)';
+      }
+      btn.dataset.paused = paused ? '1' : '0';
+    }
+    $('#pauseBtn').addEventListener('click', async () => {
+      const nuevo = $('#pauseBtn').dataset.paused !== '1';
+      $('#pauseBtn').disabled = true;
+      try {
+        await fetch('/api/admin/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: nuevo }) });
+        pintarPausa(nuevo);
+      } catch (e) { /* ignore */ }
+      finally { $('#pauseBtn').disabled = false; cargarEstado(); }
+    });
+
+    function pintarMetricas(last7) {
+      if (!last7.length) { $('#metrics').innerHTML = '<span style="color:#9ca3af">Disponible con PostgreSQL.</span>'; return; }
+      const max = Math.max(...last7.map(d => d.n), 1);
+      $('#metrics').innerHTML = '<div class="bars">' + last7.map(d =>
+        `<div class="bar" style="height:${Math.round(d.n/max*100)}%" title="${d.n} mensajes"><span>${d.dia.slice(5)}</span></div>`
+      ).join('') + '</div><div style="height:14px"></div>';
+    }
+
+    // ---- Configuración (una sección por grupo) ----
+    async function cargarConfig() {
+      const r = await fetch('/api/admin/config');
+      if (r.status === 401) { window.location.href = '/login'; return; }
+      const d = await r.json();
+      const groups = {};
+      for (const f of d.fields) (groups[f.group] = groups[f.group] || []).push(f);
+
+      const nav = $('#nav'), content = $('#content');
+      // limpiar secciones de config previas
+      content.querySelectorAll('section[data-cfg]').forEach(s => s.remove());
+      nav.querySelectorAll('a[data-cfg]').forEach(a => a.remove());
+
+      for (const [g, fields] of Object.entries(groups)) {
+        const secId = 'cfg-' + slug(g);
+        const a = document.createElement('a');
+        a.dataset.target = secId; a.dataset.label = g; a.dataset.cfg = '1';
+        a.textContent = (ICONS[g] || '📋') + ' ' + g;
+        nav.appendChild(a);
+
+        const sec = document.createElement('section');
+        sec.dataset.sec = secId; sec.dataset.cfg = '1';
+        let inner = `<div class="card"><h2>${esc(g)}</h2><form>`;
+        for (const f of fields) {
+          const note = f.live ? '' : '<span class="note"> (requiere reiniciar)</span>';
+          const secNote = f.secret ? '<span class="note"> · secreto, deja vacío para no cambiar</span>' : '';
+          let input;
+          if (f.type === 'select') input = `<select name="${f.key}">` + f.options.map(o=>{const v=(o&&typeof o==='object')?o.value:o;const l=(o&&typeof o==='object')?o.label:o;return `<option value="${esc(v)}" ${String(v)===String(f.value)?'selected':''}>${esc(l)}</option>`;}).join('') + `</select>`;
+          else if (f.type === 'textarea') input = `<textarea name="${f.key}">${f.secret?'':esc(f.value)}</textarea>`;
+          else input = `<input type="${f.type==='number'?'number':'text'}" name="${f.key}" value="${f.secret?'':esc(f.value)}" placeholder="${f.secret?esc(f.value):''}">`;
+          inner += `<label>${esc(f.label)}${note}${secNote}</label>${input}`;
+        }
+        inner += `<button type="submit">💾 Guardar</button>`;
+        if (g === 'Base de datos') inner += `<button type="button" class="ghost btn-testdb">🔌 Probar conexión BD</button>`;
+        inner += `<div class="msg"></div></form></div>`;
+        sec.innerHTML = inner;
+        content.appendChild(sec);
+
+        const form = sec.querySelector('form');
+        const msg = sec.querySelector('.msg');
+        form.addEventListener('submit', (e) => { e.preventDefault(); guardarConfig(form, msg); });
+        const testBtn = sec.querySelector('.btn-testdb');
+        if (testBtn) testBtn.addEventListener('click', () => probarDB(msg, testBtn));
+      }
+    }
+
+    async function guardarConfig(form, msg) {
+      const body = {};
+      new FormData(form).forEach((v, k) => { if (v !== '') body[k] = v; });
+      try {
+        const r = await fetch('/api/admin/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const d = await r.json();
+        if (!r.ok) { msg.className='msg err'; msg.textContent='❌ ' + (d.error||'Error'); return; }
+        if (!d.needsRestart?.length) { msg.className='msg ok'; msg.textContent='✅ Guardado. Aplicado al instante.'; cargarEstado(); return; }
+
+        if (body.PORT) {
+          // Cambio de puerto -> reiniciar y llevar al panel del nuevo puerto
+          msg.className='msg ok'; msg.textContent='✅ Guardado. ♻️ Reiniciando en el puerto ' + body.PORT + '…';
+          try { await fetch('/api/admin/restart', { method:'POST' }); } catch {}
+          const destino = location.protocol + '//' + location.hostname + ':' + body.PORT + '/admin';
+          let s = 8;
+          const t = setInterval(() => {
+            msg.innerHTML = '✅ Guardado. ♻️ Reiniciando… te llevo al panel en <b>' + s + 's</b><br><a href="' + destino + '">' + destino + '</a>';
+            if (--s < 0) { clearInterval(t); window.location.href = destino; }
+          }, 1000);
+        } else {
+          msg.className='msg ok';
+          msg.innerHTML = '✅ Guardado. Requiere reiniciar para aplicar (' + d.needsRestart.join(', ') + '). ';
+          const btn = document.createElement('button');
+          btn.className = 'mini'; btn.textContent = '🔄 Reiniciar ahora';
+          btn.onclick = reiniciarBot;
+          msg.appendChild(btn);
+          cargarEstado();
+        }
+      } catch (e) { msg.className='msg err'; msg.textContent='❌ ' + e.message; }
+    }
+
+    async function reiniciarBot() {
+      try { await fetch('/api/admin/restart', { method:'POST' }); } catch {}
+      let s = 8;
+      const st = $('#status');
+      const t = setInterval(() => {
+        if (st) st.innerHTML = '<div class="stat"><div class="k">♻️ Reiniciando…</div><div class="v">recargo en ' + s + 's</div></div>';
+        if (--s < 0) { clearInterval(t); window.location.reload(); }
+      }, 1000);
+    }
+
+    async function probarDB(msg, btn) {
+      btn.disabled = true; msg.className='msg'; msg.style.display='block'; msg.textContent='⏳ Probando conexión…';
+      try {
+        const r = await fetch('/api/admin/test-db', { method:'POST' });
+        const d = await r.json();
+        if (d.ok) { msg.className='msg ok'; msg.textContent='✅ Conexión OK: ' + d.info; }
+        else { msg.className='msg err'; msg.textContent='❌ ' + d.error; }
+      } catch (e) { msg.className='msg err'; msg.textContent='❌ ' + e.message; }
+      finally { btn.disabled = false; }
+    }
+
+    // ---- Editor de flujo ----
+    let flowData = null;
+    function nodeIds() { return Object.keys(flowData.nodes); }
+    async function cargarFlujoEditor() {
+      const r = await fetch('/api/admin/flow');
+      if (r.status === 401) { window.location.href = '/login'; return; }
+      flowData = await r.json();
+      renderFlujo();
+    }
+    function renderFlujo() {
+      let h = '';
+      h += `<label>Nodo inicial</label><select onchange="flowData.start=this.value">` +
+        nodeIds().map(id => `<option ${id === flowData.start ? 'selected' : ''}>${esc(id)}</option>`).join('') + `</select>`;
+      h += `<label>Palabras clave para volver al menú (separadas por coma)</label>` +
+        `<input value="${esc((flowData.triggers || []).join(', '))}" onchange="flowData.triggers=this.value.split(',').map(s=>s.trim()).filter(Boolean)">`;
+      for (const id of nodeIds()) {
+        const n = flowData.nodes[id];
+        h += `<div class="node"><div class="node-head"><b>🔵 ${esc(id)}</b>` +
+          `<button type="button" class="mini danger" onclick="borrarNodo('${id}')">Eliminar nodo</button></div>`;
+        h += `<label>Tipo</label><select onchange="flowData.nodes['${id}'].type=this.value; renderFlujo()">` +
+          `<option value="menu" ${n.type==='menu'?'selected':''}>menu (muestra opciones)</option>` +
+          `<option value="ai" ${n.type==='ai'?'selected':''}>ai (chat libre con IA)</option></select>`;
+        h += `<label>Mensaje</label><textarea onchange="flowData.nodes['${id}'].message=this.value">${esc(n.message || '')}</textarea>`;
+        if (n.type === 'ai') {
+          h += `<label>Contexto extra para la IA (opcional)</label>` +
+            `<input value="${esc(n.systemAddon || '')}" onchange="flowData.nodes['${id}'].systemAddon=this.value">`;
+        } else {
+          h += `<label>Opciones</label>`;
+          (n.options || []).forEach((o, i) => {
+            h += `<div class="opt"><input placeholder="Texto de la opción" value="${esc(o.label || '')}" onchange="flowData.nodes['${id}'].options[${i}].label=this.value">` +
+              `<select onchange="flowData.nodes['${id}'].options[${i}].next=this.value">` +
+              nodeIds().map(nid => `<option ${nid===o.next?'selected':''}>${esc(nid)}</option>`).join('') + `</select>` +
+              `<button type="button" class="mini danger" onclick="borrarOpcion('${id}',${i})">✕</button></div>`;
+          });
+          h += `<button type="button" class="mini" onclick="agregarOpcion('${id}')">+ Agregar opción</button>`;
+        }
+        h += `</div>`;
+      }
+      h += `<button type="button" class="mini" onclick="agregarNodo()">+ Agregar nodo</button>`;
+      $('#flowEditor').innerHTML = h;
+    }
+    function borrarNodo(id) { if (id === flowData.start) { alert('No puedes eliminar el nodo inicial.'); return; } delete flowData.nodes[id]; renderFlujo(); }
+    function agregarNodo() {
+      const id = (prompt('ID del nuevo nodo (sin espacios, ej: horarios):') || '').trim();
+      if (!id) return;
+      if (!/^[A-Za-z0-9_]+$/.test(id)) { alert('Usa solo letras, números y _'); return; }
+      if (flowData.nodes[id]) { alert('Ya existe un nodo con ese ID.'); return; }
+      flowData.nodes[id] = { type: 'ai', message: '', systemAddon: '' };
+      renderFlujo();
+    }
+    function agregarOpcion(id) { const n = flowData.nodes[id]; n.options = n.options || []; n.options.push({ key: String(n.options.length+1), label: 'Nueva opción', next: flowData.start }); renderFlujo(); }
+    function borrarOpcion(id, i) { flowData.nodes[id].options.splice(i, 1); renderFlujo(); }
+    async function guardarFlujo() {
+      for (const id of nodeIds()) { const n = flowData.nodes[id]; if (n.type==='menu' && n.options) n.options.forEach((o,i)=>o.key=String(i+1)); }
+      const msg = $('#flowMsg');
+      try {
+        const r = await fetch('/api/admin/flow', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(flowData) });
+        const d = await r.json();
+        if (r.ok) { msg.className='msg ok'; msg.textContent='✅ Flujo guardado y aplicado.'; }
+        else { msg.className='msg err'; msg.textContent='❌ ' + (d.error||'Error'); }
+      } catch (e) { msg.className='msg err'; msg.textContent='❌ ' + e.message; }
+    }
+    $('#saveFlowBtn').addEventListener('click', guardarFlujo);
+
+    // ===== Números ignorados =====
+    async function cargarIgnorados() {
+      const r = await fetch('/api/admin/ignored');
+      if (r.status === 401) { window.location.href = '/login'; return; }
+      const d = await r.json();
+      $('#ignoredList').innerHTML = (d.ignored || []).length
+        ? d.ignored.map(v => `<div class="opt"><input value="${esc(v)}" disabled style="flex:2"><button class="mini danger" type="button" data-remove="${esc(v)}">Quitar</button></div>`).join('')
+        : '<div style="color:var(--muted);font-size:13px">No hay ninguno. El bot responde a todos.</div>';
+      $('#recentList').innerHTML = (d.recent || []).length
+        ? d.recent.map(c => `<div class="opt"><span style="flex:2;font-size:12px;word-break:break-all">${c.nombre ? '<b>' + esc(c.nombre) + '</b> · ' : ''}<span style="color:var(--muted)">${esc(c.chatId)}</span>${c.lastMessage ? '<br>"' + esc(c.lastMessage) + '"' : ''}</span>${c.ignored ? '<span class="note">ya ignorado</span>' : `<button class="mini danger" type="button" data-add="${esc(c.chatId)}">🚫 Ignorar</button>`}</div>`).join('')
+        : '<div style="color:var(--muted);font-size:13px">Sin conversaciones aún.</div>';
+    }
+    async function postIgnored(action, value) {
+      await fetch('/api/admin/ignored', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, value }) });
+      cargarIgnorados();
+    }
+    $('#ignoredAddBtn').addEventListener('click', () => {
+      const v = $('#ignoredInput').value.trim(); if (!v) return;
+      $('#ignoredInput').value = ''; postIgnored('add', v);
+    });
+    $('#ignoredList').addEventListener('click', (e) => { const b = e.target.closest('[data-remove]'); if (b) postIgnored('remove', b.dataset.remove); });
+    $('#recentList').addEventListener('click', (e) => { const b = e.target.closest('[data-add]'); if (b) postIgnored('add', b.dataset.add); });
+
+    // ===== Base de conocimiento =====
+    async function cargarConocimientoPanel() {
+      const r = await fetch('/api/admin/knowledge');
+      if (r.status === 401) { window.location.href = '/login'; return; }
+      const d = await r.json();
+      $('#knowledgeText').value = d.knowledge || '';
+    }
+    $('#saveKnowledgeBtn').addEventListener('click', async () => {
+      const msg = $('#knowledgeMsg');
+      try {
+        const r = await fetch('/api/admin/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ knowledge: $('#knowledgeText').value }) });
+        const d = await r.json();
+        if (r.ok) { msg.className = 'msg ok'; msg.textContent = '✅ Guardado (' + d.length + ' caracteres). El bot ya lo usa.'; }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+    });
+    $('#uploadKnowledgeBtn').addEventListener('click', async () => {
+      const msg = $('#knowledgeMsg');
+      const f = $('#knowledgeFile').files[0];
+      if (!f) { msg.className = 'msg err'; msg.textContent = 'Elige un archivo primero (.txt o .pdf).'; return; }
+      msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Procesando "' + f.name + '"…';
+      const fd = new FormData(); fd.append('file', f);
+      try {
+        const r = await fetch('/api/admin/knowledge/upload', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (r.ok) { msg.className = 'msg ok'; msg.textContent = '✅ "' + d.nombre + '" agregado (' + d.caracteres + ' caracteres). El bot ya lo usa.'; $('#knowledgeFile').value = ''; cargarConocimientoPanel(); }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+    });
+
+    $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
+    $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
+
+    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel();
+    setInterval(cargarEstado, 5000);
+  </script>
+</body>
+</html>

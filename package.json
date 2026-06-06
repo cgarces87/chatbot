@@ -1,0 +1,28 @@
+{
+  "name": "whatsapp-openai-chatbot",
+  "version": "1.0.0",
+  "description": "Plantilla de chatbot de WhatsApp conectado a OpenAI usando open-wa",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node supervisor.js",
+    "start:once": "node index.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "openai",
+    "chatbot",
+    "open-wa"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cloudflared": "^0.7.1",
+    "dotenv": "^17.4.2",
+    "express": "^4.22.2",
+    "multer": "^2.1.1",
+    "openai": "^6.42.0",
+    "pdf-parse": "^2.4.5",
+    "pg": "^8.21.0"
+  }
+}

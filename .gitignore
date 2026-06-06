@@ -1,0 +1,20 @@
+# Secretos y configuracion local
+.env
+# Dependencias
+node_modules/
+# Datos de sesion de WhatsApp (NO compartir, contienen tu sesion)
+_IGNORE_*/
+session.data.json
+*.data.json
+# Memoria de conversaciones (privada)
+data/
+
+# Logs
+*.log
+npm-debug.log*
+
+# managed
+**.data.json
+**.node-persist**
+**_IGNORE_**
+# end managed
