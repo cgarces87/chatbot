@@ -15,10 +15,11 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ${PG_DATABASE:-chatbot}"]
+      interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 15
+      start_period: 40s
 
   # El chatbot
   chatbot:
@@ -26,8 +27,14 @@ services:
     container_name: chatbot-app
     env_file: .env
     environment:
-      # Dentro de Docker, la BD se llama "postgres" (nombre del servicio)
+      # Dentro de Docker, la BD se llama "postgres" (nombre del servicio).
+      # Estas credenciales usan el MISMO valor que el contenedor postgres,
+      # así siempre coinciden aunque falten en el .env.
       PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: ${PG_USER:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:-postgres}
+      PG_DATABASE: ${PG_DATABASE:-chatbot}
       PORT: "3000"
       # Persistir conocimiento y flujo en la carpeta montada ./data
       KNOWLEDGE_FILE: data/knowledge.md
@@ -35,6 +42,7 @@ services:
       CONV_STORE_FILE: data/conversations.json
     volumes:
       - ./data:/app/data
+      - ./.env:/app/.env
     ports:
       - "${PORT:-3000}:3000"
     depends_on:

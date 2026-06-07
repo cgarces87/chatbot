@@ -114,7 +114,10 @@
       "Bash(node -e \"const fs=require\\('fs'\\);console.log\\(fs.readFileSync\\('run.log','utf8'\\).split\\('\\\\n'\\).filter\\(l=>/↻ Reintent|send-text fallo/.test\\(l\\)\\).slice\\(-6\\).join\\('\\\\n'\\)||'\\(ninguno\\)'\\)\")",
       "Bash(node -e \"const fs=require\\('fs'\\);console.log\\(fs.readFileSync\\('run.log','utf8'\\).split\\('\\\\n'\\).filter\\(l=>/Conocimiento|Flujo|Bot listo|Servidor local|Error/.test\\(l\\)\\).join\\('\\\\n'\\)\\)\")",
       "Bash(node -e *)",
-      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Output \"Puerto 3000 libre. Bot sigue detenido.\")"
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Output \"Puerto 3000 libre. Bot sigue detenido.\")",
+      "Bash(git init *)",
+      "Bash(git config *)",
+      "Bash(grep -E \"\\\\.env$\")"
     ]
   }
 }
