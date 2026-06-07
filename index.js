@@ -155,6 +155,18 @@ function contarHandoff() {
 function waUrl(p) { return `${OPENWA_API_URL}/api/sessions/${runtime.sessionId}${p}`; }
 const waHeaders = { 'X-API-Key': OPENWA_API_KEY, 'Content-Type': 'application/json' };
 
+// Lista los modelos de CHAT disponibles en la cuenta de OpenAI (para el desplegable)
+async function getModelos() {
+  try {
+    const r = await openai.models.list();
+    const ids = (r.data || []).map((m) => m.id);
+    const excluir = /embedding|whisper|tts|audio|realtime|transcribe|moderation|dall-e|image|search|instruct|babbage|davinci|ada|computer-use|codex/i;
+    const conFecha = /-\d{4}-\d{2}-\d{2}$/; // ej. gpt-4o-2024-08-06 (foto con fecha)
+    const chat = ids.filter((id) => /^(gpt-|o1|o3|o4|chatgpt)/i.test(id) && !excluir.test(id) && !conFecha.test(id));
+    return [...new Set(chat)].sort();
+  } catch { return []; }
+}
+
 // Lista las sesiones conectadas en openwa-api (para el desplegable del panel)
 async function getSessions() {
   try {
@@ -650,6 +662,8 @@ app.get('/api/admin/config', authAdmin, async (_req, res) => {
   const env = cfg.leerEnv();
   let sessions = [];
   try { sessions = await getSessions(); } catch { /* ignore */ }
+  let modelos = [];
+  try { modelos = await getModelos(); } catch { /* ignore */ }
 
   const fields = Object.entries(cfg.EDITABLE).map(([key, meta]) => {
     const f = {
@@ -661,6 +675,12 @@ app.get('/api/admin/config', authAdmin, async (_req, res) => {
     if (key === 'OPENWA_SESSION_ID' && sessions.length) {
       f.type = 'select';
       f.options = sessions.map((s) => ({ value: s.id, label: `${s.name || s.id} (${s.phone || '?'}) · ${s.status || ''}` }));
+    }
+    // El modelo de OpenAI se muestra como desplegable con los modelos disponibles
+    if (key === 'OPENAI_MODEL' && modelos.length) {
+      const lista = modelos.includes(f.value) || !f.value ? modelos : [f.value, ...modelos];
+      f.type = 'select';
+      f.options = lista;
     }
     return f;
   });
