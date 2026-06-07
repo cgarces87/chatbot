@@ -7,6 +7,9 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: chatbot-postgres
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     environment:
       POSTGRES_USER: ${PG_USER:-postgres}
       POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres}
@@ -25,6 +28,9 @@ services:
   chatbot:
     build: .
     container_name: chatbot-app
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
     env_file: .env
     environment:
       # Dentro de Docker, la BD se llama "postgres" (nombre del servicio).
