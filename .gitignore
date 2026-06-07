@@ -1,5 +1,7 @@
 # Secretos y configuracion local
 .env
+# Config local de Claude Code (personal, no del proyecto)
+.claude/settings.local.json
 # Dependencias
 node_modules/
 # Datos de sesion de WhatsApp (NO compartir, contienen tu sesion)
