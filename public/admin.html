@@ -103,6 +103,7 @@
         <a data-target="flujo" data-label="Flujo conversacional">🧭 Flujo conversacional</a>
         <a data-target="ignorados" data-label="Números ignorados">🚫 Ignorados</a>
         <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
+        <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
       </nav>
       <div class="rol-badge" id="rolBadge" style="display:none"></div>
       <button class="logout" id="logoutBtn">Cerrar sesión</button>
@@ -190,6 +191,50 @@
           </div>
         </section>
 
+        <!-- Agenda / Google Calendar -->
+        <section data-sec="agenda">
+          <div class="card">
+            <h2>Conexión con Google Calendar</h2>
+            <div id="calStatus">Cargando…</div>
+            <div class="solo-admin" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+              <label>Subir credenciales (archivo JSON de la cuenta de servicio)</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <input type="file" id="calCredsFile" accept=".json,application/json" style="flex:1;min-width:180px">
+                <button type="button" class="ghost" id="calUploadBtn" style="margin-top:0">⬆️ Subir credenciales</button>
+              </div>
+              <p style="font-size:12px;color:var(--muted);margin:8px 0 0">
+                Los ajustes (activar, ID del calendario, zona horaria) están en la sección <b>Calendario</b> de configuración.
+              </p>
+            </div>
+            <div class="msg" id="calMsg"></div>
+          </div>
+
+          <div class="card solo-admin">
+            <h2>Crear cita / recordatorio</h2>
+            <label>Título</label>
+            <input id="evTitulo" placeholder="Ej: Cita con Juan Pérez">
+            <label>Tipo</label>
+            <select id="evTipo">
+              <option value="cita">Cita (con hora)</option>
+              <option value="reco">Recordatorio (día completo)</option>
+            </select>
+            <div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:6px">
+              <div><label>Fecha</label><input id="evFecha" type="date"></div>
+              <div id="evHoraBox"><label>Hora</label><input id="evHora" type="time" value="09:00"></div>
+              <div id="evDurBox"><label>Duración (min)</label><input id="evDur" type="number" value="60"></div>
+            </div>
+            <label>Descripción (opcional)</label>
+            <textarea id="evDesc" style="min-height:60px"></textarea>
+            <button type="button" id="evCrearBtn">📅 Crear en el calendario</button>
+            <div class="msg" id="evMsg"></div>
+          </div>
+
+          <div class="card">
+            <h2>Próximos eventos</h2>
+            <div id="calEvents">—</div>
+          </div>
+        </section>
+
         <!-- Secciones de configuración se agregan aquí dinámicamente -->
       </div>
     </main>
@@ -224,6 +269,7 @@
       if (item) $('#pageTitle').textContent = item.dataset.label;
       if (secId === 'ignorados') cargarIgnorados();
       if (secId === 'conocimiento') cargarConocimientoPanel();
+      if (secId === 'agenda') cargarAgenda();
       cerrarMenu();
     }
     document.getElementById('nav').addEventListener('click', (e) => {
@@ -509,10 +555,70 @@
       } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     });
 
+    // ===== Agenda / Google Calendar =====
+    function fmtFecha(s) {
+      if (!s) return '';
+      try { return new Date(s.length <= 10 ? s + 'T00:00:00' : s).toLocaleString('es-CO'); } catch { return s; }
+    }
+    async function cargarAgenda() {
+      try {
+        const r = await fetch('/api/admin/calendar/status');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const d = await r.json();
+        let html;
+        if (!d.enabled) html = '<span class="dot yellow"></span> Calendario <b>desactivado</b>. Actívalo en la sección <b>Calendario</b> (configuración).';
+        else if (!d.configurado) html = '<span class="dot red"></span> Falta configurar: sube las credenciales (abajo) y pon el <b>ID del calendario</b> en Calendario (config).';
+        else if (d.error) html = '<span class="dot red"></span> Error: ' + esc(d.error);
+        else html = '<span class="dot green"></span> Conectado a <b>' + esc((d.calendario && d.calendario.nombre) || d.calendarId) + '</b> · ' + esc(d.timezone);
+        $('#calStatus').innerHTML = html;
+      } catch (e) { $('#calStatus').textContent = 'Error: ' + e.message; }
+      try {
+        const r = await fetch('/api/admin/calendar/events');
+        const evs = (await r.json()).events || [];
+        $('#calEvents').innerHTML = evs.length
+          ? evs.map(e => `<div class="opt"><span style="flex:2;font-size:13px"><b>${esc(e.titulo)}</b><br><span style="color:var(--muted)">${esc(fmtFecha(e.inicio))}</span></span>${e.link ? `<a href="${esc(e.link)}" target="_blank" style="font-size:12px">ver</a>` : ''}</div>`).join('')
+          : '<div style="color:var(--muted);font-size:13px">No hay eventos próximos.</div>';
+      } catch { $('#calEvents').textContent = '—'; }
+    }
+    $('#calUploadBtn').addEventListener('click', async () => {
+      const f = $('#calCredsFile').files[0]; const msg = $('#calMsg');
+      if (!f) { msg.className = 'msg err'; msg.style.display = 'block'; msg.textContent = 'Elige el archivo JSON primero.'; return; }
+      msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Subiendo…';
+      const fd = new FormData(); fd.append('file', f);
+      try {
+        const r = await fetch('/api/admin/calendar/credentials', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (r.ok) { msg.className = 'msg ok'; msg.innerHTML = '✅ Credenciales guardadas.<br>Comparte tu calendario de Google con: <b>' + esc(d.email) + '</b>'; $('#calCredsFile').value = ''; cargarAgenda(); }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+    });
+    $('#evTipo').addEventListener('change', () => {
+      const reco = $('#evTipo').value === 'reco';
+      $('#evHoraBox').style.display = reco ? 'none' : '';
+      $('#evDurBox').style.display = reco ? 'none' : '';
+    });
+    $('#evCrearBtn').addEventListener('click', async () => {
+      const msg = $('#evMsg');
+      const titulo = $('#evTitulo').value.trim();
+      const fecha = $('#evFecha').value;
+      if (!titulo || !fecha) { msg.className = 'msg err'; msg.style.display = 'block'; msg.textContent = 'Pon al menos título y fecha.'; return; }
+      const reco = $('#evTipo').value === 'reco';
+      const body = reco
+        ? { titulo, inicio: fecha + 'T00:00:00', todoElDia: true, descripcion: $('#evDesc').value }
+        : { titulo, inicio: fecha + 'T' + ($('#evHora').value || '09:00') + ':00', duracionMin: parseInt($('#evDur').value, 10) || 60, descripcion: $('#evDesc').value };
+      msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Creando…';
+      try {
+        const r = await fetch('/api/admin/calendar/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json();
+        if (r.ok) { msg.className = 'msg ok'; msg.innerHTML = '✅ Creado. <a href="' + esc(d.evento.link) + '" target="_blank">Ver en Google Calendar</a>'; $('#evTitulo').value = ''; $('#evDesc').value = ''; cargarAgenda(); }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+    });
+
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
 
-    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel();
+    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda();
     setInterval(cargarEstado, 5000);
   </script>
 </body>

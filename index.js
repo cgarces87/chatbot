@@ -22,6 +22,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 const { createStore, probarPostgres } = require('./lib/store');
 const cfg = require('./lib/config');
 const flow = require('./lib/flow');
+const calendar = require('./lib/calendar');
 
 // ---------------- Configuracion fija (.env) ----------------
 const {
@@ -58,7 +59,18 @@ const runtime = {
   ignored: (process.env.IGNORED_CHATS || '').split(',').map((s) => s.trim()).filter(Boolean),
   knowledge: '', // base de conocimiento (precios, datos, FAQs) — se carga al arrancar
   strict: (process.env.STRICT_MODE ?? 'true') === 'true', // solo responder con la info dada
+  enableCalendar: (process.env.ENABLE_CALENDAR ?? 'false') === 'true',
 };
+
+// Configura el módulo de Google Calendar con los valores del entorno
+function configurarCalendario() {
+  calendar.configurar({
+    calendarId: process.env.GOOGLE_CALENDAR_ID || '',
+    timezone: process.env.GOOGLE_CALENDAR_TIMEZONE || 'America/Bogota',
+    credsFile: process.env.GOOGLE_CREDENTIALS_FILE || 'data/google-credentials.json',
+  });
+}
+configurarCalendario();
 
 // --- Base de conocimiento (info que el bot usa para responder) ---
 const KNOWLEDGE_FILE = process.env.KNOWLEDGE_FILE || 'data/knowledge.md';
@@ -180,18 +192,61 @@ async function getSessions() {
 // ------------------------------------------------------------
 //  OpenAI con contexto persistente por conversacion
 // ------------------------------------------------------------
+// Herramienta de calendario que el modelo puede invocar
+const HERRAMIENTAS_CAL = [{
+  type: 'function',
+  function: {
+    name: 'agendar_evento',
+    description: 'Crea una cita o recordatorio en el calendario de Google del negocio cuando el cliente lo solicita.',
+    parameters: {
+      type: 'object',
+      properties: {
+        titulo: { type: 'string', description: 'Título breve del evento, ej. "Cita con Juan Pérez"' },
+        inicio: { type: 'string', description: 'Fecha y hora de inicio en ISO 8601, ej. "2026-06-10T15:00:00". Calcúlala a partir de la fecha actual indicada en el sistema.' },
+        fin: { type: 'string', description: 'Fecha y hora de fin en ISO 8601 (opcional; si falta dura 1 hora).' },
+        todoElDia: { type: 'boolean', description: 'true si es un recordatorio de día completo, sin hora.' },
+        descripcion: { type: 'string', description: 'Detalles opcionales del evento.' },
+      },
+      required: ['titulo', 'inicio'],
+    },
+  },
+}];
+
 async function askOpenAI(chatId, userMessage, extraSystem = '') {
   const prev = await store.getRecent(chatId, runtime.maxHistory * 2);
-  const sys = systemBase(extraSystem);
-  const messages = [
-    { role: 'system', content: sys },
-    ...prev,
-    { role: 'user', content: userMessage },
-  ];
+  let sys = systemBase(extraSystem);
 
-  const completion = await openai.chat.completions.create({ model: runtime.model, messages });
-  const reply = completion.choices[0].message.content.trim();
+  const usarCalendario = runtime.enableCalendar && calendar.disponible();
+  if (usarCalendario) {
+    const ahora = new Date().toLocaleString('es-CO', { timeZone: calendar.conf.timezone });
+    sys += `\n\nFecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}). Si el cliente quiere agendar una cita o recordatorio, usa la herramienta "agendar_evento" calculando la fecha/hora real. Confirma con el cliente lo agendado.`;
+  }
 
+  const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
+  const opciones = { model: runtime.model, messages };
+  if (usarCalendario) opciones.tools = HERRAMIENTAS_CAL;
+
+  let completion = await openai.chat.completions.create(opciones);
+  let msg = completion.choices[0].message;
+
+  // Si el modelo decide agendar, ejecutamos la(s) herramienta(s) y volvemos a preguntar
+  if (msg.tool_calls && msg.tool_calls.length) {
+    messages.push(msg);
+    for (const tc of msg.tool_calls) {
+      let resultado;
+      try {
+        const args = JSON.parse(tc.function.arguments || '{}');
+        const ev = await calendar.crearEvento(args);
+        resultado = `OK. Evento "${ev.titulo}" creado. Enlace: ${ev.link}`;
+        console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`);
+      } catch (e) { resultado = 'Error al crear el evento: ' + e.message; }
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: resultado });
+    }
+    completion = await openai.chat.completions.create({ model: runtime.model, messages });
+    msg = completion.choices[0].message;
+  }
+
+  const reply = (msg.content || '').trim();
   await store.append(chatId, 'user', userMessage);
   await store.append(chatId, 'assistant', reply);
   return reply;
@@ -715,6 +770,8 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (updates.RESPONSE_DELAY_MAX !== undefined) runtime.delayMax = parseFloat(updates.RESPONSE_DELAY_MAX) || 0;
     if (updates.SHOW_TYPING !== undefined) runtime.showTyping = updates.SHOW_TYPING === 'true';
     if (updates.STRICT_MODE !== undefined) runtime.strict = updates.STRICT_MODE === 'true';
+    if (updates.ENABLE_CALENDAR !== undefined) runtime.enableCalendar = updates.ENABLE_CALENDAR === 'true';
+    if (updates.GOOGLE_CALENDAR_ID !== undefined || updates.GOOGLE_CALENDAR_TIMEZONE !== undefined) configurarCalendario();
 
     // Cambio de sesión de WhatsApp EN VIVO: mueve el webhook a la nueva sesión
     if (updates.OPENWA_SESSION_ID !== undefined && updates.OPENWA_SESSION_ID !== runtime.sessionId) {
@@ -819,6 +876,58 @@ app.post('/api/admin/knowledge/upload', authAdmin, upload.single('file'), async 
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---- Google Calendar ----
+app.get('/api/admin/calendar/status', authApi, async (_req, res) => {
+  let info = null, error = null;
+  if (calendar.disponible()) {
+    try { info = await calendar.probar(); } catch (e) { error = e.message; }
+  }
+  res.json({
+    enabled: runtime.enableCalendar,
+    configurado: calendar.disponible(),
+    calendarId: calendar.conf.calendarId,
+    timezone: calendar.conf.timezone,
+    calendario: info,
+    error,
+  });
+});
+
+app.post('/api/admin/calendar/credentials', authAdmin, upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    let json;
+    try { json = JSON.parse(req.file.buffer.toString('utf8')); }
+    catch { return res.status(400).json({ error: 'El archivo no es un JSON válido' }); }
+    if (!json.client_email || !json.private_key) return res.status(400).json({ error: 'No parece una clave de cuenta de servicio (falta client_email/private_key)' });
+    const dest = process.env.GOOGLE_CREDENTIALS_FILE || 'data/google-credentials.json';
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, JSON.stringify(json, null, 2));
+    configurarCalendario();
+    console.log('📅 Credenciales de Google Calendar guardadas:', json.client_email);
+    res.json({ ok: true, email: json.client_email });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/calendar/events', authApi, async (_req, res) => {
+  if (!calendar.disponible()) return res.json({ events: [] });
+  try { res.json({ events: await calendar.listarEventos(new Date(), null, 25) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/calendar/event', authAdmin, async (req, res) => {
+  try {
+    if (!calendar.disponible()) return res.status(400).json({ error: 'Calendario no configurado' });
+    const ev = await calendar.crearEvento(req.body || {});
+    console.log('📅 Evento creado:', ev.titulo, '->', ev.link);
+    res.json({ ok: true, evento: ev });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/calendar/event/delete', authAdmin, async (req, res) => {
+  try { await calendar.borrarEvento((req.body || {}).id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- Flujo conversacional: leer / guardar ----
