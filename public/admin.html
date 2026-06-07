@@ -73,6 +73,14 @@
 
     .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 40; }
 
+    /* Rol GESTIÓN (solo lectura): oculta controles de escritura y bloquea inputs */
+    body.rol-gestion .solo-admin { display: none !important; }
+    body.rol-gestion #flowEditor select, body.rol-gestion #flowEditor textarea, body.rol-gestion #flowEditor input,
+    body.rol-gestion #knowledgeText, body.rol-gestion #ignoredInput, body.rol-gestion #knowledgeFile {
+      pointer-events: none; background: #eef1f6; opacity: .8;
+    }
+    .rol-badge { margin: 0 16px 10px; font-size: 12px; color: #cdd9ee; background: rgba(255,255,255,.1); border-radius: 8px; padding: 8px 10px; text-align: center; }
+
     /* Responsive */
     @media (max-width: 860px) {
       .sidebar { position: fixed; left: -240px; top: 0; bottom: 0; z-index: 50; transition: left .2s; }
@@ -96,6 +104,7 @@
         <a data-target="ignorados" data-label="Números ignorados">🚫 Ignorados</a>
         <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
       </nav>
+      <div class="rol-badge" id="rolBadge" style="display:none"></div>
       <button class="logout" id="logoutBtn">Cerrar sesión</button>
     </aside>
 
@@ -110,8 +119,8 @@
           <div class="card" id="pauseCard">
             <h2>Control del bot</h2>
             <div id="pauseState" style="font-size:15px;margin-bottom:4px">—</div>
-            <button id="pauseBtn">Cargando…</button>
-            <button id="restartBtn" class="ghost">🔄 Reiniciar bot</button>
+            <button id="pauseBtn" class="solo-admin">Cargando…</button>
+            <button id="restartBtn" class="ghost solo-admin">🔄 Reiniciar bot</button>
             <p style="font-size:12px;color:var(--muted);margin:12px 0 0">
               Al pausarlo, el bot deja de responder automáticamente para que <b>tú atiendas los chats directamente</b>. Reanúdalo cuando termines.
             </p>
@@ -134,7 +143,7 @@
               Tipo <b>menu</b> = muestra opciones; tipo <b>ai</b> = chat libre con IA. Actívalo en "Comportamiento → Activar flujo de menús".
             </p>
             <div id="flowEditor">Cargando…</div>
-            <button type="button" id="saveFlowBtn">💾 Guardar flujo</button>
+            <button type="button" id="saveFlowBtn" class="solo-admin">💾 Guardar flujo</button>
             <div class="msg" id="flowMsg"></div>
           </div>
         </section>
@@ -146,8 +155,8 @@
               El bot <b>no responde</b> a estos. Útil para bots de monitoreo, notificaciones automáticas o spam.
             </p>
             <div id="ignoredList">Cargando…</div>
-            <label>Agregar (número o ID de chat)</label>
-            <div style="display:flex;gap:8px;align-items:flex-start">
+            <label class="solo-admin">Agregar (número o ID de chat)</label>
+            <div class="solo-admin" style="display:flex;gap:8px;align-items:flex-start">
               <input id="ignoredInput" placeholder="ej: 207593721069658  o  573001234567" style="flex:1">
               <button id="ignoredAddBtn" type="button" style="margin-top:0">Agregar</button>
             </div>
@@ -168,9 +177,9 @@
               Pega aquí la información que el bot debe usar para responder: <b>precios, productos, horarios, políticas, preguntas frecuentes…</b> El bot la tendrá en cuenta en <b>cada</b> respuesta. (Puedes copiar el texto de tus documentos aquí.)
             </p>
             <textarea id="knowledgeText" style="min-height:320px;font-family:inherit" placeholder="Ej:&#10;PRECIOS&#10;- Plan básico: $50.000/mes&#10;- Plan pro: $90.000/mes&#10;&#10;HORARIOS: Lunes a viernes 8am-6pm&#10;DIRECCIÓN: Calle 1 #2-3&#10;&#10;PREGUNTAS FRECUENTES&#10;- ¿Hacen envíos? Sí, a todo el país."></textarea>
-            <button type="button" id="saveKnowledgeBtn">💾 Guardar conocimiento</button>
+            <button type="button" id="saveKnowledgeBtn" class="solo-admin">💾 Guardar conocimiento</button>
 
-            <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+            <div class="solo-admin" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
               <label>O sube un documento (.txt o .pdf) — se agrega al texto de arriba</label>
               <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
                 <input type="file" id="knowledgeFile" accept=".txt,.md,.pdf" style="flex:1;min-width:180px">
@@ -192,6 +201,20 @@
     const fmtUptime = (sec) => { sec = Math.floor(sec); const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60; return (h?h+'h ':'')+(m?m+'m ':'')+s+'s'; };
     const slug = (g) => g.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
     const ICONS = { 'Comportamiento':'⚙️', 'Conexiones':'🔌', 'Base de datos':'🐘', 'Exposicion a internet':'🌐', 'Exposición a internet':'🌐' };
+
+    // ---- Rol del usuario (admin / gestion) ----
+    let rolAplicado = false;
+    function aplicarRol(role) {
+      if (rolAplicado) return;
+      rolAplicado = true;
+      const badge = $('#rolBadge');
+      if (role === 'gestion') {
+        document.body.classList.add('rol-gestion');
+        if (badge) { badge.style.display = 'block'; badge.innerHTML = '👁️ Modo Gestión<br>(solo lectura)'; }
+      } else if (badge) {
+        badge.style.display = 'block'; badge.textContent = '🛠️ Administración';
+      }
+    }
 
     // ---- Navegación entre secciones ----
     function activar(secId) {
@@ -218,6 +241,7 @@
         if (r.status === 401) { window.location.href = '/login'; return; }
         if (!r.ok) throw new Error('error ' + r.status);
         const d = await r.json();
+        aplicarRol(d.role);
         pintarPausa(d.paused);
         const ses = d.session || {}, st = d.storage || {};
         $('#status').innerHTML = `
@@ -273,6 +297,7 @@
     async function cargarConfig() {
       const r = await fetch('/api/admin/config');
       if (r.status === 401) { window.location.href = '/login'; return; }
+      if (r.status === 403) return; // rol gestión: sin acceso a configuración
       const d = await r.json();
       const groups = {};
       for (const f of d.fields) (groups[f.group] = groups[f.group] || []).push(f);
@@ -385,7 +410,7 @@
       for (const id of nodeIds()) {
         const n = flowData.nodes[id];
         h += `<div class="node"><div class="node-head"><b>🔵 ${esc(id)}</b>` +
-          `<button type="button" class="mini danger" onclick="borrarNodo('${id}')">Eliminar nodo</button></div>`;
+          `<button type="button" class="mini danger solo-admin" onclick="borrarNodo('${id}')">Eliminar nodo</button></div>`;
         h += `<label>Tipo</label><select onchange="flowData.nodes['${id}'].type=this.value; renderFlujo()">` +
           `<option value="menu" ${n.type==='menu'?'selected':''}>menu (muestra opciones)</option>` +
           `<option value="ai" ${n.type==='ai'?'selected':''}>ai (chat libre con IA)</option></select>`;
@@ -399,13 +424,13 @@
             h += `<div class="opt"><input placeholder="Texto de la opción" value="${esc(o.label || '')}" onchange="flowData.nodes['${id}'].options[${i}].label=this.value">` +
               `<select onchange="flowData.nodes['${id}'].options[${i}].next=this.value">` +
               nodeIds().map(nid => `<option ${nid===o.next?'selected':''}>${esc(nid)}</option>`).join('') + `</select>` +
-              `<button type="button" class="mini danger" onclick="borrarOpcion('${id}',${i})">✕</button></div>`;
+              `<button type="button" class="mini danger solo-admin" onclick="borrarOpcion('${id}',${i})">✕</button></div>`;
           });
-          h += `<button type="button" class="mini" onclick="agregarOpcion('${id}')">+ Agregar opción</button>`;
+          h += `<button type="button" class="mini solo-admin" onclick="agregarOpcion('${id}')">+ Agregar opción</button>`;
         }
         h += `</div>`;
       }
-      h += `<button type="button" class="mini" onclick="agregarNodo()">+ Agregar nodo</button>`;
+      h += `<button type="button" class="mini solo-admin" onclick="agregarNodo()">+ Agregar nodo</button>`;
       $('#flowEditor').innerHTML = h;
     }
     function borrarNodo(id) { if (id === flowData.start) { alert('No puedes eliminar el nodo inicial.'); return; } delete flowData.nodes[id]; renderFlujo(); }
@@ -437,10 +462,10 @@
       if (r.status === 401) { window.location.href = '/login'; return; }
       const d = await r.json();
       $('#ignoredList').innerHTML = (d.ignored || []).length
-        ? d.ignored.map(v => `<div class="opt"><input value="${esc(v)}" disabled style="flex:2"><button class="mini danger" type="button" data-remove="${esc(v)}">Quitar</button></div>`).join('')
+        ? d.ignored.map(v => `<div class="opt"><input value="${esc(v)}" disabled style="flex:2"><button class="mini danger solo-admin" type="button" data-remove="${esc(v)}">Quitar</button></div>`).join('')
         : '<div style="color:var(--muted);font-size:13px">No hay ninguno. El bot responde a todos.</div>';
       $('#recentList').innerHTML = (d.recent || []).length
-        ? d.recent.map(c => `<div class="opt"><span style="flex:2;font-size:12px;word-break:break-all">${c.nombre ? '<b>' + esc(c.nombre) + '</b> · ' : ''}<span style="color:var(--muted)">${esc(c.chatId)}</span>${c.lastMessage ? '<br>"' + esc(c.lastMessage) + '"' : ''}</span>${c.ignored ? '<span class="note">ya ignorado</span>' : `<button class="mini danger" type="button" data-add="${esc(c.chatId)}">🚫 Ignorar</button>`}</div>`).join('')
+        ? d.recent.map(c => `<div class="opt"><span style="flex:2;font-size:12px;word-break:break-all">${c.nombre ? '<b>' + esc(c.nombre) + '</b> · ' : ''}<span style="color:var(--muted)">${esc(c.chatId)}</span>${c.lastMessage ? '<br>"' + esc(c.lastMessage) + '"' : ''}</span>${c.ignored ? '<span class="note">ya ignorado</span>' : `<button class="mini danger solo-admin" type="button" data-add="${esc(c.chatId)}">🚫 Ignorar</button>`}</div>`).join('')
         : '<div style="color:var(--muted);font-size:13px">Sin conversaciones aún.</div>';
     }
     async function postIgnored(action, value) {

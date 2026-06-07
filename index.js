@@ -541,28 +541,32 @@ app.post('/webhook', async (req, res) => {
 // ============================================================
 //  Autenticacion por sesion (cookie firmada) — con pagina de login
 // ============================================================
-// El secreto depende de la contraseña: si la cambias, las sesiones caducan.
+// Dos roles: 'admin' (administración, todo) y 'gestion' (solo lectura).
+const GESTION_USER = process.env.GESTION_USER || '';
+const GESTION_PASSWORD = process.env.GESTION_PASSWORD || '';
+// El secreto depende de las contraseñas: si las cambias, las sesiones caducan.
 const SESSION_SECRET = crypto.createHash('sha256')
-  .update('sess|' + ADMIN_USER + '|' + ADMIN_PASSWORD).digest();
+  .update('sess|' + ADMIN_USER + '|' + ADMIN_PASSWORD + '|' + GESTION_PASSWORD).digest();
 const SESSION_DIAS = 7;
 
 function b64url(x) { return Buffer.from(x).toString('base64url'); }
 
-function crearToken() {
-  const payload = b64url(JSON.stringify({ u: ADMIN_USER, exp: Date.now() + SESSION_DIAS * 86400000 }));
+function crearToken(user, role) {
+  const payload = b64url(JSON.stringify({ u: user, r: role, exp: Date.now() + SESSION_DIAS * 86400000 }));
   const sig = b64url(crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest());
   return payload + '.' + sig;
 }
 
-function tokenValido(token) {
-  if (!token) return false;
+// Devuelve los datos de la sesión { u, r } si el token es válido, o null
+function tokenInfo(token) {
+  if (!token) return null;
   const [payload, sig] = token.split('.');
-  if (!payload || !sig) return false;
+  if (!payload || !sig) return null;
   const esperado = b64url(crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest());
-  if (sig.length !== esperado.length) return false;
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(esperado))) return false;
-  try { return JSON.parse(Buffer.from(payload, 'base64url')).exp > Date.now(); }
-  catch { return false; }
+  if (sig.length !== esperado.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(esperado))) return null;
+  try { const d = JSON.parse(Buffer.from(payload, 'base64url')); return d.exp > Date.now() ? d : null; }
+  catch { return null; }
 }
 
 function leerCookie(req, nombre) {
@@ -574,25 +578,38 @@ function leerCookie(req, nombre) {
   return null;
 }
 
-function estaAutenticado(req) {
-  return !ADMIN_PASSWORD || tokenValido(leerCookie(req, 'session'));
+// Sesión actual del request (o null). Si no hay contraseña configurada, admin.
+function sesion(req) {
+  if (!ADMIN_PASSWORD) return { u: ADMIN_USER, r: 'admin' };
+  return tokenInfo(leerCookie(req, 'session'));
 }
 
-// Para paginas: redirige al login. Para APIs: responde 401.
-function authPage(req, res, next) { return estaAutenticado(req) ? next() : res.redirect('/login'); }
-function authApi(req, res, next) { return estaAutenticado(req) ? next() : res.sendStatus(401); }
+// Para paginas: redirige al login.
+function authPage(req, res, next) { return sesion(req) ? next() : res.redirect('/login'); }
+// Para APIs de LECTURA (cualquier rol con sesión válida).
+function authApi(req, res, next) { return sesion(req) ? next() : res.sendStatus(401); }
+// Solo ADMINISTRACIÓN (escritura / configuración).
+function authAdmin(req, res, next) {
+  const s = sesion(req);
+  if (!s) return res.sendStatus(401);
+  if (s.r !== 'admin') return res.status(403).json({ error: 'Tu rol es de solo lectura (gestión).' });
+  next();
+}
 
 // ---- Login / logout ----
 app.get('/login', (req, res) => {
-  if (estaAutenticado(req)) return res.redirect('/admin');
+  if (sesion(req)) return res.redirect('/admin');
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
 app.post('/api/login', (req, res) => {
   const { user, password } = req.body || {};
-  if (user === ADMIN_USER && password === ADMIN_PASSWORD) {
-    res.set('Set-Cookie', `session=${crearToken()}; HttpOnly; Path=/; Max-Age=${SESSION_DIAS * 86400}; SameSite=Lax`);
-    return res.json({ ok: true });
+  let role = null;
+  if (user === ADMIN_USER && password === ADMIN_PASSWORD) role = 'admin';
+  else if (GESTION_USER && user === GESTION_USER && password === GESTION_PASSWORD) role = 'gestion';
+  if (role) {
+    res.set('Set-Cookie', `session=${crearToken(user, role)}; HttpOnly; Path=/; Max-Age=${SESSION_DIAS * 86400}; SameSite=Lax`);
+    return res.json({ ok: true, role });
   }
   res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
 });
@@ -609,13 +626,14 @@ app.get('/logo.png', (_req, res) => res.sendFile(path.join(__dirname, 'public', 
 app.get('/', (_req, res) => res.redirect('/admin'));
 app.get('/admin', authPage, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
-app.get('/api/admin/status', authApi, async (_req, res) => {
+app.get('/api/admin/status', authApi, async (req, res) => {
   const session = await getSessionInfo();
   let storage;
   try { storage = await store.metrics(); }
   catch (e) { storage = { driver: 'error', error: e.message, conversations: 0, totalMessages: 0 }; }
   res.json({
     online: true,
+    role: (sesion(req) || {}).r || 'admin',
     paused: runtime.paused,
     humanHandling: contarHandoff(),
     uptimeSec: (Date.now() - state.startedAt) / 1000,
@@ -628,7 +646,7 @@ app.get('/api/admin/status', authApi, async (_req, res) => {
   });
 });
 
-app.get('/api/admin/config', authApi, async (_req, res) => {
+app.get('/api/admin/config', authAdmin, async (_req, res) => {
   const env = cfg.leerEnv();
   let sessions = [];
   try { sessions = await getSessions(); } catch { /* ignore */ }
@@ -649,7 +667,7 @@ app.get('/api/admin/config', authApi, async (_req, res) => {
   res.json({ fields });
 });
 
-app.post('/api/admin/config', authApi, async (req, res) => {
+app.post('/api/admin/config', authAdmin, async (req, res) => {
   try {
     const updates = {};
     const needsRestart = [];
@@ -698,7 +716,7 @@ app.post('/api/admin/config', authApi, async (req, res) => {
 });
 
 // ---- Pausar / reanudar el bot (modo atención humana) ----
-app.post('/api/admin/pause', authApi, (req, res) => {
+app.post('/api/admin/pause', authAdmin, (req, res) => {
   const paused = req.body && req.body.paused === true;
   runtime.paused = paused;
   try { cfg.actualizarEnv({ BOT_PAUSED: String(paused) }); } catch (e) { /* no crítico */ }
@@ -707,7 +725,7 @@ app.post('/api/admin/pause', authApi, (req, res) => {
 });
 
 // ---- Reiniciar el bot (lo relanza el supervisor con npm start) ----
-app.post('/api/admin/restart', authApi, (_req, res) => {
+app.post('/api/admin/restart', authAdmin, (_req, res) => {
   res.json({ ok: true });
   console.log('♻️  Reinicio solicitado desde el panel');
   setTimeout(() => cerrar(75), 300);
@@ -722,7 +740,7 @@ app.get('/api/admin/ignored', authApi, async (_req, res) => {
   res.json({ ignored: runtime.ignored, recent });
 });
 
-app.post('/api/admin/ignored', authApi, (req, res) => {
+app.post('/api/admin/ignored', authAdmin, (req, res) => {
   const accion = req.body && req.body.action;
   const valor = (req.body && String(req.body.value || '').trim()) || '';
   if (!valor) return res.status(400).json({ error: 'Valor vacío' });
@@ -743,7 +761,7 @@ app.post('/api/admin/ignored', authApi, (req, res) => {
 app.get('/api/admin/knowledge', authApi, (_req, res) => {
   res.json({ knowledge: runtime.knowledge || '' });
 });
-app.post('/api/admin/knowledge', authApi, (req, res) => {
+app.post('/api/admin/knowledge', authAdmin, (req, res) => {
   try {
     guardarConocimiento(String((req.body && req.body.knowledge) || ''));
     console.log(`📚 Base de conocimiento actualizada (${runtime.knowledge.length} caracteres)`);
@@ -754,7 +772,7 @@ app.post('/api/admin/knowledge', authApi, (req, res) => {
 });
 
 // Subir un documento (.txt o .pdf) y agregar su texto al conocimiento
-app.post('/api/admin/knowledge/upload', authApi, upload.single('file'), async (req, res) => {
+app.post('/api/admin/knowledge/upload', authAdmin, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No se recibió ningún archivo' });
     const nombre = req.file.originalname || 'documento';
@@ -788,7 +806,7 @@ app.get('/api/admin/flow', authApi, (_req, res) => {
   res.json(flow.obtener());
 });
 
-app.post('/api/admin/flow', authApi, (req, res) => {
+app.post('/api/admin/flow', authAdmin, (req, res) => {
   try {
     flow.guardar(req.body);
     res.json({ ok: true });
@@ -798,7 +816,7 @@ app.post('/api/admin/flow', authApi, (req, res) => {
 });
 
 // ---- Probar la conexion a Postgres (con los datos guardados) ----
-app.post('/api/admin/test-db', authApi, async (_req, res) => {
+app.post('/api/admin/test-db', authAdmin, async (_req, res) => {
   try {
     const env = cfg.leerEnv();
     const r = await probarPostgres(env);
