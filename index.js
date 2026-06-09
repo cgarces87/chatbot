@@ -98,17 +98,9 @@ function plantillaCita() {
   return _plantillaCita;
 }
 
-// Envía la confirmación de una cita por correo (al cliente y/o a ti)
-//  datos: { emailCliente, nombreCliente, empresa }  (también acepta solo el email como string)
-async function confirmarCita(evento, datos = {}) {
-  if (!runtime.enableSmtp || !mailer.disponible()) return;
+// Calcula los datos formateados de una cita (fecha/hora en español, Colombia)
+function datosCita(evento, datos = {}) {
   if (typeof datos === 'string') datos = { emailCliente: datos };
-  const destinatarios = [];
-  if (datos.emailCliente) destinatarios.push(datos.emailCliente);
-  if (process.env.NOTIFY_EMAIL) destinatarios.push(process.env.NOTIFY_EMAIL);
-  if (!destinatarios.length) return;
-
-  // Formato de fecha/hora en español (Colombia)
   const tz = calendar.conf.timezone || 'America/Bogota';
   const dIni = evento.inicio && evento.inicio.dateTime ? new Date(evento.inicio.dateTime) : null;
   const dFin = evento.fin && evento.fin.dateTime ? new Date(evento.fin.dateTime) : null;
@@ -123,7 +115,41 @@ async function confirmarCita(evento, datos = {}) {
     const h = Math.floor(min / 60), mm = min % 60;
     dur = [h ? h + (h === 1 ? ' hora' : ' horas') : '', mm ? mm + ' min' : ''].filter(Boolean).join(' ') || (min + ' min');
   }
-  const meet = evento.meet || evento.link || '';
+  return {
+    nombreCliente: datos.nombreCliente || '',
+    empresa: datos.empresa || '',
+    emailCliente: datos.emailCliente || '',
+    titulo: evento.titulo || 'Cita',
+    fFecha, fHoraIni, fHoraFin, dur,
+    meet: evento.meet || evento.link || '',
+  };
+}
+
+// Mensaje de confirmación de cita para WhatsApp (mismo formato, en texto)
+function mensajeCitaWhatsApp(evento, datos = {}) {
+  const d = datosCita(evento, datos);
+  const L = ['✅ *¡Cita confirmada!*', '', '📅 *Detalles de la cita*'];
+  if (d.empresa) L.push(`🏢 Empresa: ${d.empresa}`);
+  if (d.nombreCliente) L.push(`👤 Contacto: ${d.nombreCliente}`);
+  if (d.fFecha) L.push(`🗓️ Fecha: ${d.fFecha}`);
+  if (d.fHoraIni) L.push(`🕐 Hora: ${d.fHoraIni}${d.fHoraFin ? ' – ' + d.fHoraFin : ''} (hora Colombia)`);
+  if (d.dur) L.push(`⏱️ Duración: ${d.dur}`);
+  if (d.meet) L.push('💻 Modalidad: Virtual por Google Meet', '', '💻 *Enlace de la reunión*', d.meet);
+  L.push('', 'Si necesitas reagendar o tienes alguna duda, respóndenos por aquí. ¡Te esperamos! 🙌');
+  return L.join('\n');
+}
+
+// Envía la confirmación de una cita por correo (al cliente y/o a ti)
+//  datos: { emailCliente, nombreCliente, empresa }  (también acepta solo el email como string)
+async function confirmarCita(evento, datos = {}) {
+  if (!runtime.enableSmtp || !mailer.disponible()) return;
+  if (typeof datos === 'string') datos = { emailCliente: datos };
+  const destinatarios = [];
+  if (datos.emailCliente) destinatarios.push(datos.emailCliente);
+  if (process.env.NOTIFY_EMAIL) destinatarios.push(process.env.NOTIFY_EMAIL);
+  if (!destinatarios.length) return;
+
+  const { fFecha, fHoraIni, fHoraFin, dur, meet } = datosCita(evento, datos);
 
   // Usa la plantilla bonita si existe; si no, un correo simple de respaldo
   const tpl = plantillaCita();
@@ -330,9 +356,9 @@ async function ejecutarHerramienta(nombre, args, chatId) {
     const ev = await calendar.crearEvento(args);
     console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
     await confirmarCita(ev, { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa });
-    return `Evento "${ev.titulo}" creado para ${args.inicio}.`
-      + (ev.meet ? ` Enlace de Google Meet: ${ev.meet} (compártelo con el cliente).` : '')
-      + (args.emailCliente ? ` Confirmación enviada a ${args.emailCliente}.` : '');
+    const wa = mensajeCitaWhatsApp(ev, args);
+    return `La cita quedó agendada correctamente${args.emailCliente ? ` y se envió la confirmación por correo a ${args.emailCliente}` : ''}.`
+      + ` Responde al cliente con EXACTAMENTE el siguiente mensaje, sin cambiar ni agregar nada:\n\n${wa}`;
   }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
