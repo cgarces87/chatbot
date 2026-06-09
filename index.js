@@ -100,6 +100,7 @@ async function confirmarCita(evento, emailCliente) {
     <ul>
       <li><b>${evento.titulo || 'Cita'}</b></li>
       <li>Fecha/hora: ${cuando}</li>
+      ${evento.meet ? `<li>Reunión por Google Meet: <a href="${evento.meet}">${evento.meet}</a></li>` : ''}
     </ul>
     ${evento.link ? `<p><a href="${evento.link}">Ver en el calendario</a></p>` : ''}
     <p>¡Te esperamos!</p>`;
@@ -244,6 +245,7 @@ const HERRAMIENTA_CAL = {
         todoElDia: { type: 'boolean', description: 'true si es un recordatorio de día completo, sin hora.' },
         descripcion: { type: 'string', description: 'Detalles opcionales del evento.' },
         emailCliente: { type: 'string', description: 'Correo del cliente para enviarle la confirmación (si lo proporciona).' },
+        conMeet: { type: 'boolean', description: 'true si la cita es una reunión virtual/videollamada y debe generar un enlace de Google Meet.' },
       },
       required: ['titulo', 'inicio'],
     },
@@ -280,9 +282,11 @@ function herramientasActivas() {
 async function ejecutarHerramienta(nombre, args, chatId) {
   if (nombre === 'agendar_evento') {
     const ev = await calendar.crearEvento(args);
-    console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`);
+    console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
     await confirmarCita(ev, args.emailCliente);
-    return `Evento "${ev.titulo}" creado para ${args.inicio}.` + (args.emailCliente ? ` Confirmación enviada a ${args.emailCliente}.` : '');
+    return `Evento "${ev.titulo}" creado para ${args.inicio}.`
+      + (ev.meet ? ` Enlace de Google Meet: ${ev.meet} (compártelo con el cliente).` : '')
+      + (args.emailCliente ? ` Confirmación enviada a ${args.emailCliente}.` : '');
   }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
