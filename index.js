@@ -70,6 +70,7 @@ function configurarCalendario() {
     calendarId: process.env.GOOGLE_CALENDAR_ID || '',
     timezone: process.env.GOOGLE_CALENDAR_TIMEZONE || 'America/Bogota',
     credsFile: process.env.GOOGLE_CREDENTIALS_FILE || 'data/google-credentials.json',
+    meetLink: process.env.GOOGLE_MEET_LINK || '',
   });
 }
 configurarCalendario();
@@ -855,7 +856,7 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (updates.SHOW_TYPING !== undefined) runtime.showTyping = updates.SHOW_TYPING === 'true';
     if (updates.STRICT_MODE !== undefined) runtime.strict = updates.STRICT_MODE === 'true';
     if (updates.ENABLE_CALENDAR !== undefined) runtime.enableCalendar = updates.ENABLE_CALENDAR === 'true';
-    if (updates.GOOGLE_CALENDAR_ID !== undefined || updates.GOOGLE_CALENDAR_TIMEZONE !== undefined) configurarCalendario();
+    if (['GOOGLE_CALENDAR_ID', 'GOOGLE_CALENDAR_TIMEZONE', 'GOOGLE_MEET_LINK'].some(k => updates[k] !== undefined)) configurarCalendario();
     if (updates.ENABLE_SMTP !== undefined) runtime.enableSmtp = updates.ENABLE_SMTP === 'true';
     if (['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM'].some(k => updates[k] !== undefined)) configurarCorreo();
 
