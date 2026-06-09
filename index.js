@@ -384,7 +384,8 @@ Tienes una herramienta (función) llamada "agendar_evento". Es la ÚNICA forma r
 - NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.`;
   }
   if (runtime.enableSmtp && mailer.disponible()) {
-    sys += `\n\nPuedes enviar correos con la herramienta "enviar_correo" cuando el cliente lo pida (ej. mandarle información a su email). Pide siempre el correo del destinatario si no lo tienes.`;
+    sys += `\n\nTienes una herramienta "enviar_correo" SOLO para cuando el cliente pida enviar a su correo información DISTINTA a una cita (ej. un catálogo, una cotización o datos sueltos).
+PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notificaciones de citas/demos: esos correos los envía el sistema AUTOMÁTICAMENTE con la plantilla oficial (al cliente y al equipo) en el momento en que llamas "agendar_evento". NUNCA redactes ni reenvíes tú una confirmación de cita por correo.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
