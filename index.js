@@ -1171,6 +1171,9 @@ let tunnelProc = null;
   runtime.knowledge = cargarConocimiento();
   console.log(`🧭 Flujo conversacional: ${runtime.enableFlow ? 'ACTIVADO' : 'desactivado'}`);
   console.log(`📚 Base de conocimiento: ${runtime.knowledge ? runtime.knowledge.length + ' caracteres' : 'vacía'}`);
+  console.log(`📅 Calendario: ${runtime.enableCalendar ? (calendar.disponible() ? 'ACTIVO (herramienta agendar_evento disponible)' : 'activado pero SIN credenciales/ID') : 'desactivado'}`);
+  console.log(`✉️  Correo SMTP: ${runtime.enableSmtp ? (mailer.disponible() ? 'ACTIVO' : 'activado pero sin host/usuario/clave') : 'desactivado'}`);
+  console.log(`🔧 Herramientas del bot activas: ${herramientasActivas().map((t) => t.function.name).join(', ') || 'NINGUNA'}`);
 
   app.listen(port, async () => {
     console.log(`\n✅ Servidor local escuchando en http://localhost:${port}`);
