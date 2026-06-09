@@ -350,15 +350,16 @@ function herramientasActivas() {
   return t;
 }
 
-// Ejecuta una herramienta pedida por el modelo y devuelve el resultado (texto)
-async function ejecutarHerramienta(nombre, args, chatId) {
+// Ejecuta una herramienta pedida por el modelo y devuelve el resultado (texto).
+// ctx.respuestaDirecta: si se define, ese texto se envía al cliente TAL CUAL (sin que el modelo lo reescriba).
+async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   if (nombre === 'agendar_evento') {
     const ev = await calendar.crearEvento(args);
     console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
     await confirmarCita(ev, { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa });
-    const wa = mensajeCitaWhatsApp(ev, args);
-    return `La cita quedó agendada correctamente${args.emailCliente ? ` y se envió la confirmación por correo a ${args.emailCliente}` : ''}.`
-      + ` Responde al cliente con EXACTAMENTE el siguiente mensaje, sin cambiar ni agregar nada:\n\n${wa}`;
+    // La confirmación al cliente va con formato fijo (plantilla), no la deja parafrasear el modelo
+    ctx.respuestaDirecta = mensajeCitaWhatsApp(ev, args);
+    return 'Cita agendada y confirmación enviada al cliente.';
   }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
@@ -375,7 +376,7 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
   const tools = herramientasActivas();
   if (runtime.enableCalendar && calendar.disponible()) {
     const ahora = new Date().toLocaleString('es-CO', { timeZone: calendar.conf.timezone });
-    sys += `\n\nFecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}). Si el cliente quiere agendar una cita o recordatorio, usa la herramienta "agendar_evento" calculando la fecha/hora real. Confirma con el cliente lo agendado.`;
+    sys += `\n\nFecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}). Cuando el cliente confirme la fecha y hora, llama DE INMEDIATO a la herramienta "agendar_evento" (calcula la fecha/hora real). NO escribas mensajes de relleno como "un momento por favor" ni redactes tú la confirmación: el sistema envía automáticamente la confirmación con los detalles y el enlace de Meet.`;
   }
   if (runtime.enableSmtp && mailer.disponible()) {
     sys += `\n\nPuedes enviar correos con la herramienta "enviar_correo" cuando el cliente lo pida (ej. mandarle información a su email). Pide siempre el correo del destinatario si no lo tienes.`;
@@ -389,14 +390,21 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
   let msg = completion.choices[0].message;
 
   // Si el modelo decide usar herramientas, las ejecutamos y volvemos a preguntar
+  const ctx = {};
   if (msg.tool_calls && msg.tool_calls.length) {
     messages.push(msg);
     for (const tc of msg.tool_calls) {
       let resultado;
       try {
-        resultado = await ejecutarHerramienta(tc.function.name, JSON.parse(tc.function.arguments || '{}'), chatId);
+        resultado = await ejecutarHerramienta(tc.function.name, JSON.parse(tc.function.arguments || '{}'), chatId, ctx);
       } catch (e) { resultado = 'Error al ejecutar ' + tc.function.name + ': ' + e.message; }
       messages.push({ role: 'tool', tool_call_id: tc.id, content: resultado });
+    }
+    // Si una herramienta definió una respuesta de formato fijo, se envía tal cual (sin parafraseo del modelo)
+    if (ctx.respuestaDirecta) {
+      await store.append(chatId, 'user', userMessage);
+      await store.append(chatId, 'assistant', ctx.respuestaDirecta);
+      return ctx.respuestaDirecta;
     }
     completion = await openai.chat.completions.create({ model: runtime.model, messages });
     msg = completion.choices[0].message;
