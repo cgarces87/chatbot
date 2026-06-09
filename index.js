@@ -376,7 +376,12 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
   const tools = herramientasActivas();
   if (runtime.enableCalendar && calendar.disponible()) {
     const ahora = new Date().toLocaleString('es-CO', { timeZone: calendar.conf.timezone });
-    sys += `\n\nFecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}). Cuando el cliente confirme la fecha y hora, llama DE INMEDIATO a la herramienta "agendar_evento" (calcula la fecha/hora real). NO escribas mensajes de relleno como "un momento por favor" ni redactes tú la confirmación: el sistema envía automáticamente la confirmación con los detalles y el enlace de Meet.`;
+    sys += `\n\n=== AGENDAMIENTO DE CITAS (REGLA OBLIGATORIA, PRIORIDAD MÁXIMA) ===
+Fecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}).
+Tienes una herramienta (función) llamada "agendar_evento". Es la ÚNICA forma real de crear una cita: si NO la llamas, NO ocurre nada (no se crea el evento, no se envía el correo, el cliente NO recibe nada).
+- Cuando el cliente confirme el motivo/interfaz y un horario, tu siguiente acción DEBE ser llamar la herramienta "agendar_evento" con: titulo, inicio, fin (45 minutos después del inicio), conMeet=true, emailCliente, nombreCliente y empresa.
+- ESTÁ TERMINANTEMENTE PROHIBIDO decir que una cita "quedó agendada", "fue cancelada" o que "se envió un correo de confirmación" si NO has llamado la herramienta en este mismo turno. Afirmarlo sin llamarla es ENGAÑAR al cliente.
+- NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.`;
   }
   if (runtime.enableSmtp && mailer.disponible()) {
     sys += `\n\nPuedes enviar correos con la herramienta "enviar_correo" cuando el cliente lo pida (ej. mandarle información a su email). Pide siempre el correo del destinatario si no lo tienes.`;
