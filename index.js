@@ -23,6 +23,7 @@ const { createStore, probarPostgres } = require('./lib/store');
 const cfg = require('./lib/config');
 const flow = require('./lib/flow');
 const calendar = require('./lib/calendar');
+const mailer = require('./lib/mailer');
 
 // ---------------- Configuracion fija (.env) ----------------
 const {
@@ -60,6 +61,7 @@ const runtime = {
   knowledge: '', // base de conocimiento (precios, datos, FAQs) — se carga al arrancar
   strict: (process.env.STRICT_MODE ?? 'true') === 'true', // solo responder con la info dada
   enableCalendar: (process.env.ENABLE_CALENDAR ?? 'false') === 'true',
+  enableSmtp: (process.env.ENABLE_SMTP ?? 'false') === 'true',
 };
 
 // Configura el módulo de Google Calendar con los valores del entorno
@@ -71,6 +73,41 @@ function configurarCalendario() {
   });
 }
 configurarCalendario();
+
+// Configura el envío de correo (SMTP) con los valores del entorno
+function configurarCorreo() {
+  mailer.configurar({
+    host: process.env.SMTP_HOST || '',
+    port: process.env.SMTP_PORT || 587,
+    secure: (process.env.SMTP_SECURE ?? 'false') === 'true',
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASSWORD || '',
+    from: process.env.SMTP_FROM || '',
+  });
+}
+configurarCorreo();
+
+// Envía la confirmación de una cita por correo (al cliente y/o a ti)
+async function confirmarCita(evento, emailCliente) {
+  if (!runtime.enableSmtp || !mailer.disponible()) return;
+  const destinatarios = [];
+  if (emailCliente) destinatarios.push(emailCliente);
+  if (process.env.NOTIFY_EMAIL) destinatarios.push(process.env.NOTIFY_EMAIL);
+  if (!destinatarios.length) return;
+  const cuando = (evento.inicio && (evento.inicio.dateTime || evento.inicio.date)) || '';
+  const html = `<p>Hola,</p>
+    <p>Tu cita ha quedado <b>agendada</b>:</p>
+    <ul>
+      <li><b>${evento.titulo || 'Cita'}</b></li>
+      <li>Fecha/hora: ${cuando}</li>
+    </ul>
+    ${evento.link ? `<p><a href="${evento.link}">Ver en el calendario</a></p>` : ''}
+    <p>¡Te esperamos!</p>`;
+  try {
+    await mailer.enviar({ to: destinatarios.join(','), subject: `Confirmación de cita: ${evento.titulo || 'Cita'}`, html });
+    console.log('✉️  Confirmación de cita enviada a', destinatarios.join(', '));
+  } catch (e) { console.error('✉️  Error enviando confirmación:', e.message); }
+}
 
 // --- Base de conocimiento (info que el bot usa para responder) ---
 const KNOWLEDGE_FILE = process.env.KNOWLEDGE_FILE || 'data/knowledge.md';
@@ -193,7 +230,7 @@ async function getSessions() {
 //  OpenAI con contexto persistente por conversacion
 // ------------------------------------------------------------
 // Herramienta de calendario que el modelo puede invocar
-const HERRAMIENTAS_CAL = [{
+const HERRAMIENTA_CAL = {
   type: 'function',
   function: {
     name: 'agendar_evento',
@@ -206,40 +243,83 @@ const HERRAMIENTAS_CAL = [{
         fin: { type: 'string', description: 'Fecha y hora de fin en ISO 8601 (opcional; si falta dura 1 hora).' },
         todoElDia: { type: 'boolean', description: 'true si es un recordatorio de día completo, sin hora.' },
         descripcion: { type: 'string', description: 'Detalles opcionales del evento.' },
+        emailCliente: { type: 'string', description: 'Correo del cliente para enviarle la confirmación (si lo proporciona).' },
       },
       required: ['titulo', 'inicio'],
     },
   },
-}];
+};
+
+// Herramienta de correo que el modelo puede invocar
+const HERRAMIENTA_CORREO = {
+  type: 'function',
+  function: {
+    name: 'enviar_correo',
+    description: 'Envía un correo electrónico desde la cuenta del negocio cuando el cliente lo solicita (ej. enviarle una cotización, información o un resumen a su email).',
+    parameters: {
+      type: 'object',
+      properties: {
+        para: { type: 'string', description: 'Correo del destinatario.' },
+        asunto: { type: 'string', description: 'Asunto del correo.' },
+        mensaje: { type: 'string', description: 'Cuerpo del correo (texto claro y bien redactado).' },
+      },
+      required: ['para', 'asunto', 'mensaje'],
+    },
+  },
+};
+
+// Devuelve las herramientas activas según lo configurado
+function herramientasActivas() {
+  const t = [];
+  if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL);
+  if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
+  return t;
+}
+
+// Ejecuta una herramienta pedida por el modelo y devuelve el resultado (texto)
+async function ejecutarHerramienta(nombre, args, chatId) {
+  if (nombre === 'agendar_evento') {
+    const ev = await calendar.crearEvento(args);
+    console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`);
+    await confirmarCita(ev, args.emailCliente);
+    return `Evento "${ev.titulo}" creado para ${args.inicio}.` + (args.emailCliente ? ` Confirmación enviada a ${args.emailCliente}.` : '');
+  }
+  if (nombre === 'enviar_correo') {
+    await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
+    console.log(`✉️  (chat) ${chatId} envió correo a ${args.para}`);
+    return `Correo enviado a ${args.para}.`;
+  }
+  return 'Herramienta desconocida.';
+}
 
 async function askOpenAI(chatId, userMessage, extraSystem = '') {
   const prev = await store.getRecent(chatId, runtime.maxHistory * 2);
   let sys = systemBase(extraSystem);
 
-  const usarCalendario = runtime.enableCalendar && calendar.disponible();
-  if (usarCalendario) {
+  const tools = herramientasActivas();
+  if (runtime.enableCalendar && calendar.disponible()) {
     const ahora = new Date().toLocaleString('es-CO', { timeZone: calendar.conf.timezone });
     sys += `\n\nFecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}). Si el cliente quiere agendar una cita o recordatorio, usa la herramienta "agendar_evento" calculando la fecha/hora real. Confirma con el cliente lo agendado.`;
+  }
+  if (runtime.enableSmtp && mailer.disponible()) {
+    sys += `\n\nPuedes enviar correos con la herramienta "enviar_correo" cuando el cliente lo pida (ej. mandarle información a su email). Pide siempre el correo del destinatario si no lo tienes.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
   const opciones = { model: runtime.model, messages };
-  if (usarCalendario) opciones.tools = HERRAMIENTAS_CAL;
+  if (tools.length) opciones.tools = tools;
 
   let completion = await openai.chat.completions.create(opciones);
   let msg = completion.choices[0].message;
 
-  // Si el modelo decide agendar, ejecutamos la(s) herramienta(s) y volvemos a preguntar
+  // Si el modelo decide usar herramientas, las ejecutamos y volvemos a preguntar
   if (msg.tool_calls && msg.tool_calls.length) {
     messages.push(msg);
     for (const tc of msg.tool_calls) {
       let resultado;
       try {
-        const args = JSON.parse(tc.function.arguments || '{}');
-        const ev = await calendar.crearEvento(args);
-        resultado = `OK. Evento "${ev.titulo}" creado. Enlace: ${ev.link}`;
-        console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`);
-      } catch (e) { resultado = 'Error al crear el evento: ' + e.message; }
+        resultado = await ejecutarHerramienta(tc.function.name, JSON.parse(tc.function.arguments || '{}'), chatId);
+      } catch (e) { resultado = 'Error al ejecutar ' + tc.function.name + ': ' + e.message; }
       messages.push({ role: 'tool', tool_call_id: tc.id, content: resultado });
     }
     completion = await openai.chat.completions.create({ model: runtime.model, messages });
@@ -772,6 +852,8 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (updates.STRICT_MODE !== undefined) runtime.strict = updates.STRICT_MODE === 'true';
     if (updates.ENABLE_CALENDAR !== undefined) runtime.enableCalendar = updates.ENABLE_CALENDAR === 'true';
     if (updates.GOOGLE_CALENDAR_ID !== undefined || updates.GOOGLE_CALENDAR_TIMEZONE !== undefined) configurarCalendario();
+    if (updates.ENABLE_SMTP !== undefined) runtime.enableSmtp = updates.ENABLE_SMTP === 'true';
+    if (['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM'].some(k => updates[k] !== undefined)) configurarCorreo();
 
     // Cambio de sesión de WhatsApp EN VIVO: mueve el webhook a la nueva sesión
     if (updates.OPENWA_SESSION_ID !== undefined && updates.OPENWA_SESSION_ID !== runtime.sessionId) {
@@ -921,6 +1003,7 @@ app.post('/api/admin/calendar/event', authAdmin, async (req, res) => {
     if (!calendar.disponible()) return res.status(400).json({ error: 'Calendario no configurado' });
     const ev = await calendar.crearEvento(req.body || {});
     console.log('📅 Evento creado:', ev.titulo, '->', ev.link);
+    await confirmarCita(ev, (req.body || {}).emailCliente);
     res.json({ ok: true, evento: ev });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -928,6 +1011,37 @@ app.post('/api/admin/calendar/event', authAdmin, async (req, res) => {
 app.post('/api/admin/calendar/event/delete', authAdmin, async (req, res) => {
   try { await calendar.borrarEvento((req.body || {}).id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Correo (SMTP) ----
+app.get('/api/admin/smtp/status', authApi, async (_req, res) => {
+  let info = null, error = null;
+  if (mailer.disponible()) {
+    try { info = await mailer.probar(); } catch (e) { error = e.message; }
+  }
+  res.json({
+    enabled: runtime.enableSmtp,
+    configurado: mailer.disponible(),
+    from: mailer.conf.from || mailer.conf.user,
+    host: mailer.conf.host,
+    notifica: process.env.NOTIFY_EMAIL || '',
+    info,
+    error,
+  });
+});
+
+app.post('/api/admin/smtp/test', authAdmin, async (req, res) => {
+  try {
+    const to = (req.body || {}).to;
+    if (!to) return res.status(400).json({ error: 'Falta el correo destinatario' });
+    await mailer.enviar({
+      to,
+      subject: 'Prueba del chatbot ✅',
+      text: 'Este es un correo de prueba enviado desde el panel del chatbot. Si lo recibiste, el SMTP funciona correctamente. 🎉',
+    });
+    console.log('✉️  Correo de prueba enviado a', to);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- Flujo conversacional: leer / guardar ----

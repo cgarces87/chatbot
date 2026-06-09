@@ -104,6 +104,7 @@
         <a data-target="ignorados" data-label="Números ignorados">🚫 Ignorados</a>
         <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
         <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
+        <a data-target="correo" data-label="Correo (SMTP)">✉️ Correo</a>
       </nav>
       <div class="rol-badge" id="rolBadge" style="display:none"></div>
       <button class="logout" id="logoutBtn">Cerrar sesión</button>
@@ -223,6 +224,8 @@
               <div id="evHoraBox"><label>Hora</label><input id="evHora" type="time" value="09:00"></div>
               <div id="evDurBox"><label>Duración (min)</label><input id="evDur" type="number" value="60"></div>
             </div>
+            <label>Correo del cliente (para enviar confirmación, opcional)</label>
+            <input id="evEmail" type="email" placeholder="cliente@correo.com">
             <label>Descripción (opcional)</label>
             <textarea id="evDesc" style="min-height:60px"></textarea>
             <button type="button" id="evCrearBtn">📅 Crear en el calendario</button>
@@ -232,6 +235,25 @@
           <div class="card">
             <h2>Próximos eventos</h2>
             <div id="calEvents">—</div>
+          </div>
+        </section>
+
+        <!-- Correo / SMTP -->
+        <section data-sec="correo">
+          <div class="card">
+            <h2>Estado del correo (SMTP)</h2>
+            <div id="smtpStatus">Cargando…</div>
+            <p style="font-size:12px;color:var(--muted);margin:10px 0 0">
+              Los ajustes (servidor, usuario, clave, remitente) están en la sección <b>Correo</b> de configuración.
+            </p>
+          </div>
+
+          <div class="card solo-admin">
+            <h2>Enviar correo de prueba</h2>
+            <label>Destinatario</label>
+            <input id="smtpTestTo" type="email" placeholder="tucorreo@ejemplo.com">
+            <button type="button" id="smtpTestBtn">✉️ Enviar prueba</button>
+            <div class="msg" id="smtpMsg"></div>
           </div>
         </section>
 
@@ -270,6 +292,7 @@
       if (secId === 'ignorados') cargarIgnorados();
       if (secId === 'conocimiento') cargarConocimientoPanel();
       if (secId === 'agenda') cargarAgenda();
+      if (secId === 'correo') cargarCorreo();
       cerrarMenu();
     }
     document.getElementById('nav').addEventListener('click', (e) => {
@@ -603,9 +626,10 @@
       const fecha = $('#evFecha').value;
       if (!titulo || !fecha) { msg.className = 'msg err'; msg.style.display = 'block'; msg.textContent = 'Pon al menos título y fecha.'; return; }
       const reco = $('#evTipo').value === 'reco';
+      const emailCliente = $('#evEmail').value.trim();
       const body = reco
-        ? { titulo, inicio: fecha + 'T00:00:00', todoElDia: true, descripcion: $('#evDesc').value }
-        : { titulo, inicio: fecha + 'T' + ($('#evHora').value || '09:00') + ':00', duracionMin: parseInt($('#evDur').value, 10) || 60, descripcion: $('#evDesc').value };
+        ? { titulo, inicio: fecha + 'T00:00:00', todoElDia: true, descripcion: $('#evDesc').value, emailCliente }
+        : { titulo, inicio: fecha + 'T' + ($('#evHora').value || '09:00') + ':00', duracionMin: parseInt($('#evDur').value, 10) || 60, descripcion: $('#evDesc').value, emailCliente };
       msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Creando…';
       try {
         const r = await fetch('/api/admin/calendar/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -615,10 +639,36 @@
       } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     });
 
+    // ===== Correo / SMTP =====
+    async function cargarCorreo() {
+      try {
+        const r = await fetch('/api/admin/smtp/status');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const d = await r.json();
+        let html;
+        if (!d.enabled) html = '<span class="dot yellow"></span> Correo <b>desactivado</b>. Actívalo en la sección <b>Correo</b> (configuración).';
+        else if (!d.configurado) html = '<span class="dot red"></span> Falta configurar el servidor SMTP (host, usuario y clave) en <b>Correo</b> (config).';
+        else if (d.error) html = '<span class="dot red"></span> Error de conexión: ' + esc(d.error);
+        else html = '<span class="dot green"></span> Conectado. Remitente: <b>' + esc(d.from) + '</b>' + (d.notifica ? ' · Notifica a: ' + esc(d.notifica) : '');
+        $('#smtpStatus').innerHTML = html;
+      } catch (e) { $('#smtpStatus').textContent = 'Error: ' + e.message; }
+    }
+    $('#smtpTestBtn').addEventListener('click', async () => {
+      const to = $('#smtpTestTo').value.trim(); const msg = $('#smtpMsg');
+      if (!to) { msg.className = 'msg err'; msg.style.display = 'block'; msg.textContent = 'Pon un correo destinatario.'; return; }
+      msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Enviando…';
+      try {
+        const r = await fetch('/api/admin/smtp/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) });
+        const d = await r.json();
+        if (r.ok) { msg.className = 'msg ok'; msg.textContent = '✅ Correo de prueba enviado a ' + to + '. Revisa la bandeja (y spam).'; }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+    });
+
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
 
-    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda();
+    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo();
     setInterval(cargarEstado, 5000);
   </script>
 </body>
