@@ -324,6 +324,24 @@ const HERRAMIENTA_CAL = {
   },
 };
 
+// Herramienta para cancelar una cita ya agendada
+const HERRAMIENTA_CANCELAR = {
+  type: 'function',
+  function: {
+    name: 'cancelar_cita',
+    description: 'Cancela (elimina) una cita o demo ya agendada en el calendario. Requiere al menos la fecha (y hora si se sabe) de la cita, o el nombre o correo del cliente.',
+    parameters: {
+      type: 'object',
+      properties: {
+        inicio: { type: 'string', description: 'Fecha (y hora si la sabe) de la cita a cancelar, en ISO 8601, ej. "2026-06-10T15:00:00".' },
+        nombreCliente: { type: 'string', description: 'Nombre del cliente cuya cita se cancela (opcional).' },
+        emailCliente: { type: 'string', description: 'Correo del cliente cuya cita se cancela (opcional).' },
+      },
+      required: [],
+    },
+  },
+};
+
 // Herramienta de correo que el modelo puede invocar
 const HERRAMIENTA_CORREO = {
   type: 'function',
@@ -345,7 +363,7 @@ const HERRAMIENTA_CORREO = {
 // Devuelve las herramientas activas según lo configurado
 function herramientasActivas() {
   const t = [];
-  if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL);
+  if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   return t;
 }
@@ -360,6 +378,12 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     // La confirmación al cliente va con formato fijo (plantilla), no la deja parafrasear el modelo
     ctx.respuestaDirecta = mensajeCitaWhatsApp(ev, args);
     return 'Cita agendada y confirmación enviada al cliente.';
+  }
+  if (nombre === 'cancelar_cita') {
+    const borrados = await calendar.cancelarCita(args);
+    console.log(`🗑️  (chat) ${chatId} canceló ${borrados.length} cita(s)`);
+    if (!borrados.length) return 'No encontré ninguna cita con esos datos. Pídele al cliente la fecha/hora exacta o su correo para ubicarla.';
+    return 'Citas canceladas: ' + borrados.map((b) => `"${b.titulo}"`).join(', ') + '. Confirma al cliente la cancelación.';
   }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
@@ -381,7 +405,8 @@ Fecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}).
 Tienes una herramienta (función) llamada "agendar_evento". Es la ÚNICA forma real de crear una cita: si NO la llamas, NO ocurre nada (no se crea el evento, no se envía el correo, el cliente NO recibe nada).
 - Cuando el cliente confirme el motivo/interfaz y un horario, tu siguiente acción DEBE ser llamar la herramienta "agendar_evento" con: titulo, inicio, fin (45 minutos después del inicio), conMeet=true, emailCliente, nombreCliente y empresa.
 - ESTÁ TERMINANTEMENTE PROHIBIDO decir que una cita "quedó agendada", "fue cancelada" o que "se envió un correo de confirmación" si NO has llamado la herramienta en este mismo turno. Afirmarlo sin llamarla es ENGAÑAR al cliente.
-- NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.`;
+- NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.
+CANCELAR CITAS: para cancelar una cita usa la herramienta "cancelar_cita". Antes, pídele al cliente la fecha (y hora) de la cita o su correo para ubicarla. PROHIBIDO afirmar que una cita "fue cancelada" sin haber llamado "cancelar_cita" en este turno.`;
   }
   if (runtime.enableSmtp && mailer.disponible()) {
     sys += `\n\nTienes una herramienta "enviar_correo" SOLO para cuando el cliente pida enviar a su correo información DISTINTA a una cita (ej. un catálogo, una cotización o datos sueltos).
