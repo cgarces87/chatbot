@@ -88,25 +88,68 @@ function configurarCorreo() {
 }
 configurarCorreo();
 
+// Plantilla HTML de confirmación de cita (se carga una vez)
+let _plantillaCita;
+function plantillaCita() {
+  if (_plantillaCita === undefined) {
+    try { _plantillaCita = fs.readFileSync(path.join(__dirname, 'templates', 'cita.html'), 'utf8'); }
+    catch { _plantillaCita = ''; }
+  }
+  return _plantillaCita;
+}
+
 // Envía la confirmación de una cita por correo (al cliente y/o a ti)
-async function confirmarCita(evento, emailCliente) {
+//  datos: { emailCliente, nombreCliente, empresa }  (también acepta solo el email como string)
+async function confirmarCita(evento, datos = {}) {
   if (!runtime.enableSmtp || !mailer.disponible()) return;
+  if (typeof datos === 'string') datos = { emailCliente: datos };
   const destinatarios = [];
-  if (emailCliente) destinatarios.push(emailCliente);
+  if (datos.emailCliente) destinatarios.push(datos.emailCliente);
   if (process.env.NOTIFY_EMAIL) destinatarios.push(process.env.NOTIFY_EMAIL);
   if (!destinatarios.length) return;
-  const cuando = (evento.inicio && (evento.inicio.dateTime || evento.inicio.date)) || '';
-  const html = `<p>Hola,</p>
-    <p>Tu cita ha quedado <b>agendada</b>:</p>
-    <ul>
-      <li><b>${evento.titulo || 'Cita'}</b></li>
-      <li>Fecha/hora: ${cuando}</li>
-      ${evento.meet ? `<li>Reunión por Google Meet: <a href="${evento.meet}">${evento.meet}</a></li>` : ''}
-    </ul>
-    ${evento.link ? `<p><a href="${evento.link}">Ver en el calendario</a></p>` : ''}
-    <p>¡Te esperamos!</p>`;
+
+  // Formato de fecha/hora en español (Colombia)
+  const tz = calendar.conf.timezone || 'America/Bogota';
+  const dIni = evento.inicio && evento.inicio.dateTime ? new Date(evento.inicio.dateTime) : null;
+  const dFin = evento.fin && evento.fin.dateTime ? new Date(evento.fin.dateTime) : null;
+  const fFecha = dIni
+    ? dIni.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: tz })
+    : ((evento.inicio && evento.inicio.date) || '');
+  const fHoraIni = dIni ? dIni.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }) : '';
+  const fHoraFin = dFin ? dFin.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }) : '';
+  let dur = '';
+  if (dIni && dFin) {
+    const min = Math.round((dFin - dIni) / 60000);
+    const h = Math.floor(min / 60), mm = min % 60;
+    dur = [h ? h + (h === 1 ? ' hora' : ' horas') : '', mm ? mm + ' min' : ''].filter(Boolean).join(' ') || (min + ' min');
+  }
+  const meet = evento.meet || evento.link || '';
+
+  // Usa la plantilla bonita si existe; si no, un correo simple de respaldo
+  const tpl = plantillaCita();
+  let html;
+  if (tpl) {
+    const repl = {
+      '[NOMBRE_CLIENTE]': datos.nombreCliente || 'cliente',
+      '[NOMBRE_EMPRESA]': datos.empresa || '—',
+      '[FECHA_DEMO]': fFecha,
+      '[HORA_INICIO]': fHoraIni,
+      '[HORA_FIN]': fHoraFin,
+      '[DURACION]': dur,
+      '[ENLACE_MEET]': meet,
+    };
+    html = tpl;
+    for (const [k, v] of Object.entries(repl)) html = html.split(k).join(v || '');
+  } else {
+    const cuando = (evento.inicio && (evento.inicio.dateTime || evento.inicio.date)) || '';
+    html = `<p>Hola,</p><p>Tu cita ha quedado <b>agendada</b>:</p><ul>
+      <li><b>${evento.titulo || 'Cita'}</b></li><li>Fecha/hora: ${cuando}</li>
+      ${meet ? `<li>Google Meet: <a href="${meet}">${meet}</a></li>` : ''}</ul>
+      ${evento.link ? `<p><a href="${evento.link}">Ver en el calendario</a></p>` : ''}<p>¡Te esperamos!</p>`;
+  }
+
   try {
-    await mailer.enviar({ to: destinatarios.join(','), subject: `Confirmación de cita: ${evento.titulo || 'Cita'}`, html });
+    await mailer.enviar({ to: destinatarios.join(','), subject: `Confirmación de su cita: ${evento.titulo || 'Cita'}`, html });
     console.log('✉️  Confirmación de cita enviada a', destinatarios.join(', '));
   } catch (e) { console.error('✉️  Error enviando confirmación:', e.message); }
 }
@@ -246,6 +289,8 @@ const HERRAMIENTA_CAL = {
         todoElDia: { type: 'boolean', description: 'true si es un recordatorio de día completo, sin hora.' },
         descripcion: { type: 'string', description: 'Detalles opcionales del evento.' },
         emailCliente: { type: 'string', description: 'Correo del cliente para enviarle la confirmación (si lo proporciona).' },
+        nombreCliente: { type: 'string', description: 'Nombre del cliente/contacto (si lo proporciona).' },
+        empresa: { type: 'string', description: 'Nombre de la empresa del cliente (si lo proporciona).' },
         conMeet: { type: 'boolean', description: 'true si la cita es una reunión virtual/videollamada y debe generar un enlace de Google Meet.' },
       },
       required: ['titulo', 'inicio'],
@@ -284,7 +329,7 @@ async function ejecutarHerramienta(nombre, args, chatId) {
   if (nombre === 'agendar_evento') {
     const ev = await calendar.crearEvento(args);
     console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
-    await confirmarCita(ev, args.emailCliente);
+    await confirmarCita(ev, { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa });
     return `Evento "${ev.titulo}" creado para ${args.inicio}.`
       + (ev.meet ? ` Enlace de Google Meet: ${ev.meet} (compártelo con el cliente).` : '')
       + (args.emailCliente ? ` Confirmación enviada a ${args.emailCliente}.` : '');
@@ -1008,7 +1053,7 @@ app.post('/api/admin/calendar/event', authAdmin, async (req, res) => {
     if (!calendar.disponible()) return res.status(400).json({ error: 'Calendario no configurado' });
     const ev = await calendar.crearEvento(req.body || {});
     console.log('📅 Evento creado:', ev.titulo, '->', ev.link);
-    await confirmarCita(ev, (req.body || {}).emailCliente);
+    await confirmarCita(ev, { emailCliente: (req.body || {}).emailCliente, nombreCliente: (req.body || {}).nombreCliente, empresa: (req.body || {}).empresa });
     res.json({ ok: true, evento: ev });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

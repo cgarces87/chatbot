@@ -224,6 +224,10 @@
               <div id="evHoraBox"><label>Hora</label><input id="evHora" type="time" value="09:00"></div>
               <div id="evDurBox"><label>Duración (min)</label><input id="evDur" type="number" value="60"></div>
             </div>
+            <label>Nombre del cliente (opcional)</label>
+            <input id="evNombre" placeholder="Juan Pérez">
+            <label>Empresa del cliente (opcional)</label>
+            <input id="evEmpresa" placeholder="Mi Empresa S.A.S.">
             <label>Correo del cliente (para enviar confirmación, opcional)</label>
             <input id="evEmail" type="email" placeholder="cliente@correo.com">
             <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
@@ -630,15 +634,17 @@
       if (!titulo || !fecha) { msg.className = 'msg err'; msg.style.display = 'block'; msg.textContent = 'Pon al menos título y fecha.'; return; }
       const reco = $('#evTipo').value === 'reco';
       const emailCliente = $('#evEmail').value.trim();
+      const nombreCliente = $('#evNombre').value.trim();
+      const empresa = $('#evEmpresa').value.trim();
       const conMeet = $('#evMeet').checked;
       const body = reco
-        ? { titulo, inicio: fecha + 'T00:00:00', todoElDia: true, descripcion: $('#evDesc').value, emailCliente }
-        : { titulo, inicio: fecha + 'T' + ($('#evHora').value || '09:00') + ':00', duracionMin: parseInt($('#evDur').value, 10) || 60, descripcion: $('#evDesc').value, emailCliente, conMeet };
+        ? { titulo, inicio: fecha + 'T00:00:00', todoElDia: true, descripcion: $('#evDesc').value, emailCliente, nombreCliente, empresa }
+        : { titulo, inicio: fecha + 'T' + ($('#evHora').value || '09:00') + ':00', duracionMin: parseInt($('#evDur').value, 10) || 60, descripcion: $('#evDesc').value, emailCliente, nombreCliente, empresa, conMeet };
       msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Creando…';
       try {
         const r = await fetch('/api/admin/calendar/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const d = await r.json();
-        if (r.ok) { msg.className = 'msg ok'; msg.innerHTML = '✅ Creado. <a href="' + esc(d.evento.link) + '" target="_blank">Ver en Google Calendar</a>' + (d.evento.meet ? '<br>🎥 Meet: <a href="' + esc(d.evento.meet) + '" target="_blank">' + esc(d.evento.meet) + '</a>' : ''); $('#evTitulo').value = ''; $('#evDesc').value = ''; $('#evMeet').checked = false; cargarAgenda(); }
+        if (r.ok) { msg.className = 'msg ok'; msg.innerHTML = '✅ Creado. <a href="' + esc(d.evento.link) + '" target="_blank">Ver en Google Calendar</a>' + (d.evento.meet ? '<br>🎥 Meet: <a href="' + esc(d.evento.meet) + '" target="_blank">' + esc(d.evento.meet) + '</a>' : ''); $('#evTitulo').value = ''; $('#evDesc').value = ''; $('#evNombre').value = ''; $('#evEmpresa').value = ''; $('#evEmail').value = ''; $('#evMeet').checked = false; cargarAgenda(); }
         else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
       } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     });
