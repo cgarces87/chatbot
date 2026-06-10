@@ -411,14 +411,17 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   if (nombre === 'enviar_qr_pago') {
     const caption = process.env.PAGO_QR_CAPTION || 'Escanea este código QR desde la app de tu banco para pagar con Bre-B. Llave: @pronetsys';
     // Preferimos enviar por URL (body diminuto) porque el proxy de openwa rechaza POST grandes (base64).
+    const esJpg = /\.jpe?g$/i.test(pagoQrFile());
+    const ext = esJpg ? 'jpg' : 'png';
+    const mime = esJpg ? 'image/jpeg' : 'image/png';
+    const filename = `pago-pronetsys.${ext}`;
     const urlExterna = (process.env.PAGO_QR_URL || '').trim();
     let opts;
-    if (urlExterna) opts = { url: urlExterna, caption };
-    else if (state.publicUrl) opts = { url: `${state.publicUrl}/pago/qr.img`, caption };
+    if (urlExterna) opts = { url: urlExterna, mimetype: mime, filename, caption };
+    else if (state.publicUrl) opts = { url: `${state.publicUrl}/pago/qr.${ext}`, mimetype: mime, filename, caption };
     else { // último recurso: base64 (puede fallar si la imagen pesa mucho)
       const base64 = fs.readFileSync(pagoQrFile()).toString('base64');
-      const mime = /\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png';
-      opts = { base64, mimetype: mime, filename: 'qr-pago.png', caption };
+      opts = { base64, mimetype: mime, filename, caption };
     }
     await sendWhatsAppImage(chatId, opts);
     console.log(`💳 (chat) ${chatId} recibió el QR de pago`);
@@ -640,7 +643,9 @@ async function sendWhatsAppImage(chatId, { url, base64, mimetype, caption, filen
   await humanDelay();
   const body = { chatId, caption: caption || undefined };
   if (url) body.url = url;
-  if (base64) { body.base64 = base64; body.mimetype = mimetype || 'image/png'; body.filename = filename || 'imagen.png'; }
+  if (base64) body.base64 = base64;
+  if (mimetype) body.mimetype = mimetype;   // así openwa sabe que es JPG/PNG (no un .img genérico)
+  if (filename) body.filename = filename;
 
   let ultimoError = '';
   for (let intento = 1; intento <= 2; intento++) {
@@ -1255,7 +1260,7 @@ app.get('/api/admin/pagos/qr-img', authApi, (_req, res) => {
 });
 
 // Ruta PÚBLICA del QR (sin auth) para que openwa-api la descargue al enviar la imagen
-app.get('/pago/qr.img', (_req, res) => {
+app.get(['/pago/qr.jpg', '/pago/qr.jpeg', '/pago/qr.png', '/pago/qr.img'], (_req, res) => {
   if (!qrDisponible()) return res.status(404).end();
   res.type(/\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png');
   fs.createReadStream(pagoQrFile()).pipe(res);
