@@ -454,8 +454,16 @@ CANCELAR CITAS: para cancelar una cita usa la herramienta "cancelar_cita". Antes
     sys += `\n\nTienes una herramienta "enviar_correo" SOLO para cuando el cliente pida enviar a su correo información DISTINTA a una cita (ej. un catálogo, una cotización o datos sueltos).
 PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notificaciones de citas/demos: esos correos los envía el sistema AUTOMÁTICAMENTE con la plantilla oficial (al cliente y al equipo) en el momento en que llamas "agendar_evento". NUNCA redactes ni reenvíes tú una confirmación de cita por correo.`;
   }
-  if (runtime.enablePagos && qrDisponible()) {
-    sys += `\n\nPAGOS: cuando el cliente quiera pagar por QR, pida "el QR", o quiera pagar con Bre-B desde su banco, llama la herramienta "enviar_qr_pago" para enviarle la imagen del código QR. No describas el QR con texto; envíalo con la herramienta.`;
+  if (runtime.enablePagos) {
+    let pagos = '\n\nPAGOS:';
+    if (qrDisponible()) {
+      pagos += ` Cuando el cliente quiera pagar por QR, pida "el QR", o quiera pagar con Bre-B desde su banco, llama la herramienta "enviar_qr_pago" para enviarle la imagen del código QR. No describas el QR con texto; envíalo con la herramienta.`;
+    }
+    const wompi = (process.env.PAGO_WOMPI_URL || '').trim();
+    if (wompi) {
+      pagos += ` Si el cliente prefiere pagar en línea (tarjeta de crédito/débito o PSE), compártele este enlace de pago de la pasarela Wompi: ${wompi} — aclárale que este medio tiene un costo adicional por comisión de la pasarela: 2.65% + $700 + IVA por transacción exitosa.`;
+    }
+    if (qrDisponible() || wompi) sys += pagos;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
