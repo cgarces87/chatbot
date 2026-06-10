@@ -409,10 +409,18 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     return 'Citas canceladas: ' + borrados.map((b) => `"${b.titulo}"`).join(', ') + '. Confirma al cliente la cancelación.';
   }
   if (nombre === 'enviar_qr_pago') {
-    const base64 = fs.readFileSync(pagoQrFile()).toString('base64');
-    const mime = /\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png';
     const caption = process.env.PAGO_QR_CAPTION || 'Escanea este código QR desde la app de tu banco para pagar con Bre-B. Llave: @pronetsys';
-    await sendWhatsAppImage(chatId, { base64, mimetype: mime, caption, filename: 'qr-pago.png' });
+    // Preferimos enviar por URL (body diminuto) porque el proxy de openwa rechaza POST grandes (base64).
+    const urlExterna = (process.env.PAGO_QR_URL || '').trim();
+    let opts;
+    if (urlExterna) opts = { url: urlExterna, caption };
+    else if (state.publicUrl) opts = { url: `${state.publicUrl}/pago/qr.img`, caption };
+    else { // último recurso: base64 (puede fallar si la imagen pesa mucho)
+      const base64 = fs.readFileSync(pagoQrFile()).toString('base64');
+      const mime = /\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png';
+      opts = { base64, mimetype: mime, filename: 'qr-pago.png', caption };
+    }
+    await sendWhatsAppImage(chatId, opts);
     console.log(`💳 (chat) ${chatId} recibió el QR de pago`);
     return 'El QR de pago ya se le envió al cliente como imagen (con la llave Bre-B). Solo confirma brevemente; NO repitas el contenido del QR.';
   }
@@ -1241,6 +1249,13 @@ app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), (req, res) => 
 });
 
 app.get('/api/admin/pagos/qr-img', authApi, (_req, res) => {
+  if (!qrDisponible()) return res.status(404).end();
+  res.type(/\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png');
+  fs.createReadStream(pagoQrFile()).pipe(res);
+});
+
+// Ruta PÚBLICA del QR (sin auth) para que openwa-api la descargue al enviar la imagen
+app.get('/pago/qr.img', (_req, res) => {
   if (!qrDisponible()) return res.status(404).end();
   res.type(/\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png');
   fs.createReadStream(pagoQrFile()).pipe(res);
