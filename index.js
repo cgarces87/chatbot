@@ -62,6 +62,7 @@ const runtime = {
   strict: (process.env.STRICT_MODE ?? 'true') === 'true', // solo responder con la info dada
   enableCalendar: (process.env.ENABLE_CALENDAR ?? 'false') === 'true',
   enableSmtp: (process.env.ENABLE_SMTP ?? 'false') === 'true',
+  enablePagos: (process.env.ENABLE_PAGOS ?? 'false') === 'true',
 };
 
 // Configura el módulo de Google Calendar con los valores del entorno
@@ -360,11 +361,33 @@ const HERRAMIENTA_CORREO = {
   },
 };
 
+// Herramienta para enviar el QR de pago (Bre-B) como imagen
+const HERRAMIENTA_QR = {
+  type: 'function',
+  function: {
+    name: 'enviar_qr_pago',
+    description: 'Envía al cliente la imagen del código QR de pago (Bre-B) cuando pide el QR, quiere pagar por QR o por Bre-B desde su banco.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+};
+
+// Ruta del archivo del QR de pago (busca el que exista: png/jpg) y si está disponible
+function pagoQrFile() {
+  if (process.env.PAGO_QR_FILE) return path.resolve(process.env.PAGO_QR_FILE);
+  for (const ext of ['.png', '.jpg', '.jpeg']) {
+    const p = path.resolve('data/qr-pago' + ext);
+    if (fs.existsSync(p)) return p;
+  }
+  return path.resolve('data/qr-pago.png'); // por defecto (puede no existir aún)
+}
+function qrDisponible() { try { return fs.existsSync(pagoQrFile()); } catch { return false; } }
+
 // Devuelve las herramientas activas según lo configurado
 function herramientasActivas() {
   const t = [];
   if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
+  if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
   return t;
 }
 
@@ -384,6 +407,14 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     console.log(`🗑️  (chat) ${chatId} canceló ${borrados.length} cita(s)`);
     if (!borrados.length) return 'No encontré ninguna cita con esos datos. Pídele al cliente la fecha/hora exacta o su correo para ubicarla.';
     return 'Citas canceladas: ' + borrados.map((b) => `"${b.titulo}"`).join(', ') + '. Confirma al cliente la cancelación.';
+  }
+  if (nombre === 'enviar_qr_pago') {
+    const base64 = fs.readFileSync(pagoQrFile()).toString('base64');
+    const mime = /\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png';
+    const caption = process.env.PAGO_QR_CAPTION || 'Escanea este código QR desde la app de tu banco para pagar con Bre-B. Llave: @pronetsys';
+    await sendWhatsAppImage(chatId, { base64, mimetype: mime, caption, filename: 'qr-pago.png' });
+    console.log(`💳 (chat) ${chatId} recibió el QR de pago`);
+    return 'El QR de pago ya se le envió al cliente como imagen (con la llave Bre-B). Solo confirma brevemente; NO repitas el contenido del QR.';
   }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
@@ -411,6 +442,9 @@ CANCELAR CITAS: para cancelar una cita usa la herramienta "cancelar_cita". Antes
   if (runtime.enableSmtp && mailer.disponible()) {
     sys += `\n\nTienes una herramienta "enviar_correo" SOLO para cuando el cliente pida enviar a su correo información DISTINTA a una cita (ej. un catálogo, una cotización o datos sueltos).
 PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notificaciones de citas/demos: esos correos los envía el sistema AUTOMÁTICAMENTE con la plantilla oficial (al cliente y al equipo) en el momento en que llamas "agendar_evento". NUNCA redactes ni reenvíes tú una confirmación de cita por correo.`;
+  }
+  if (runtime.enablePagos && qrDisponible()) {
+    sys += `\n\nPAGOS: cuando el cliente quiera pagar por QR, pida "el QR", o quiera pagar con Bre-B desde su banco, llama la herramienta "enviar_qr_pago" para enviarle la imagen del código QR. No describas el QR con texto; envíalo con la herramienta.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
@@ -589,6 +623,27 @@ async function sendWhatsApp(chatId, text) {
     if (intento < 2) { console.warn(`↻ Reintentando envío a ${chatId} (falló: ${ultimoError})`); await new Promise((r) => setTimeout(r, 1500)); }
   }
   throw new Error(`send-text fallo a ${chatId}: ${ultimoError}`);
+}
+
+// Envía una imagen por WhatsApp (por URL o base64) con caption opcional
+async function sendWhatsAppImage(chatId, { url, base64, mimetype, caption, filename } = {}) {
+  marcarEnvioBot(caption || '[imagen]');
+  await mostrarEscribiendo(chatId, true);
+  await humanDelay();
+  const body = { chatId, caption: caption || undefined };
+  if (url) body.url = url;
+  if (base64) { body.base64 = base64; body.mimetype = mimetype || 'image/png'; body.filename = filename || 'imagen.png'; }
+
+  let ultimoError = '';
+  for (let intento = 1; intento <= 2; intento++) {
+    const res = await fetch(waUrl('/messages/send-image'), {
+      method: 'POST', headers: waHeaders, body: JSON.stringify(body),
+    });
+    if (res.ok) return res.json();
+    ultimoError = `${res.status} ${(await res.text()).slice(0, 150)}`;
+    if (intento < 2) { console.warn(`↻ Reintentando imagen a ${chatId} (falló: ${ultimoError})`); await new Promise((r) => setTimeout(r, 1500)); }
+  }
+  throw new Error(`send-image fallo a ${chatId}: ${ultimoError}`);
 }
 
 async function getSessionInfo() {
@@ -969,6 +1024,7 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (['GOOGLE_CALENDAR_ID', 'GOOGLE_CALENDAR_TIMEZONE', 'GOOGLE_MEET_LINK'].some(k => updates[k] !== undefined)) configurarCalendario();
     if (updates.ENABLE_SMTP !== undefined) runtime.enableSmtp = updates.ENABLE_SMTP === 'true';
     if (['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM'].some(k => updates[k] !== undefined)) configurarCorreo();
+    if (updates.ENABLE_PAGOS !== undefined) runtime.enablePagos = updates.ENABLE_PAGOS === 'true';
 
     // Cambio de sesión de WhatsApp EN VIVO: mueve el webhook a la nueva sesión
     if (updates.OPENWA_SESSION_ID !== undefined && updates.OPENWA_SESSION_ID !== runtime.sessionId) {
@@ -1157,6 +1213,37 @@ app.post('/api/admin/smtp/test', authAdmin, async (req, res) => {
     console.log('✉️  Correo de prueba enviado a', to);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Pagos: QR (Bre-B) ----
+app.get('/api/admin/pagos/status', authApi, (_req, res) => {
+  res.json({
+    enabled: runtime.enablePagos,
+    qrCargado: qrDisponible(),
+    caption: process.env.PAGO_QR_CAPTION || '',
+  });
+});
+
+app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    if (!/^image\//.test(req.file.mimetype || '')) return res.status(400).json({ error: 'El archivo debe ser una imagen (PNG o JPG)' });
+    const ext = /jpe?g/i.test(req.file.mimetype) ? '.jpg' : '.png';
+    fs.mkdirSync(path.resolve('data'), { recursive: true });
+    // Quitar variantes previas para no dejar dos archivos
+    for (const e of ['.png', '.jpg', '.jpeg']) { const p = path.resolve('data/qr-pago' + e); if (fs.existsSync(p)) fs.unlinkSync(p); }
+    const dest = process.env.PAGO_QR_FILE ? path.resolve(process.env.PAGO_QR_FILE) : path.resolve('data/qr-pago' + ext);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, req.file.buffer);
+    console.log('💳 QR de pago actualizado:', dest);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/admin/pagos/qr-img', authApi, (_req, res) => {
+  if (!qrDisponible()) return res.status(404).end();
+  res.type(/\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png');
+  fs.createReadStream(pagoQrFile()).pipe(res);
 });
 
 // ---- Flujo conversacional: leer / guardar ----

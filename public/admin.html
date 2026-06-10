@@ -105,6 +105,7 @@
         <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
         <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
         <a data-target="correo" data-label="Correo (SMTP)">✉️ Correo</a>
+        <a data-target="pagos" data-label="Pagos (QR Bre-B)">💳 Pagos</a>
       </nav>
       <div class="rol-badge" id="rolBadge" style="display:none"></div>
       <button class="logout" id="logoutBtn">Cerrar sesión</button>
@@ -264,6 +265,26 @@
           </div>
         </section>
 
+        <!-- Pagos / QR Bre-B -->
+        <section data-sec="pagos">
+          <div class="card">
+            <h2>QR de pago (Bre-B)</h2>
+            <div id="pagosStatus">Cargando…</div>
+            <div class="solo-admin" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+              <label>Subir imagen del código QR (PNG o JPG)</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <input type="file" id="qrFile" accept="image/png,image/jpeg" style="flex:1;min-width:180px">
+                <button type="button" class="ghost" id="qrUploadBtn" style="margin-top:0">⬆️ Subir QR</button>
+              </div>
+              <p style="font-size:12px;color:var(--muted);margin:8px 0 0">
+                Actívalo y ajusta el texto en la sección <b>Pagos</b> de configuración. El bot lo envía cuando el cliente pide el QR o quiere pagar con Bre-B.
+              </p>
+              <div id="qrPreview" style="margin-top:14px"></div>
+            </div>
+            <div class="msg" id="pagosMsg"></div>
+          </div>
+        </section>
+
         <!-- Secciones de configuración se agregan aquí dinámicamente -->
       </div>
     </main>
@@ -300,6 +321,7 @@
       if (secId === 'conocimiento') cargarConocimientoPanel();
       if (secId === 'agenda') cargarAgenda();
       if (secId === 'correo') cargarCorreo();
+      if (secId === 'pagos') cargarPagos();
       cerrarMenu();
     }
     document.getElementById('nav').addEventListener('click', (e) => {
@@ -675,10 +697,39 @@
       } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     });
 
+    // ===== Pagos / QR Bre-B =====
+    async function cargarPagos() {
+      try {
+        const r = await fetch('/api/admin/pagos/status');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const d = await r.json();
+        let html;
+        if (!d.enabled) html = '<span class="dot yellow"></span> Pagos <b>desactivados</b>. Actívalo en la sección <b>Pagos</b> (configuración).';
+        else if (!d.qrCargado) html = '<span class="dot red"></span> Falta <b>subir la imagen del QR</b> (abajo).';
+        else html = '<span class="dot green"></span> QR cargado y activo. El bot lo enviará cuando el cliente pida pagar por QR.';
+        $('#pagosStatus').innerHTML = html;
+        $('#qrPreview').innerHTML = d.qrCargado
+          ? '<img src="/api/admin/pagos/qr-img?t=' + Date.now() + '" alt="QR" style="max-width:200px;border:1px solid var(--border);border-radius:8px;padding:6px;background:#fff">'
+          : '';
+      } catch (e) { $('#pagosStatus').textContent = 'Error: ' + e.message; }
+    }
+    $('#qrUploadBtn').addEventListener('click', async () => {
+      const f = $('#qrFile').files[0]; const msg = $('#pagosMsg');
+      if (!f) { msg.className = 'msg err'; msg.style.display = 'block'; msg.textContent = 'Elige una imagen primero.'; return; }
+      msg.className = 'msg'; msg.style.display = 'block'; msg.textContent = '⏳ Subiendo QR…';
+      const fd = new FormData(); fd.append('file', f);
+      try {
+        const r = await fetch('/api/admin/pagos/qr', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (r.ok) { msg.className = 'msg ok'; msg.textContent = '✅ QR subido correctamente.'; $('#qrFile').value = ''; cargarPagos(); }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
+    });
+
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
 
-    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo();
+    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos();
     setInterval(cargarEstado, 5000);
   </script>
 </body>
