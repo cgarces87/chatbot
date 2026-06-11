@@ -382,6 +382,30 @@ function pagoQrFile() {
 }
 function qrDisponible() { try { return fs.existsSync(pagoQrFile()); } catch { return false; } }
 
+// Prepara el QR para envío por WhatsApp: máx 640px y ~60 KB (probado que el
+// celular lo descarga bien y cabe bajo el límite de body del proxy de openwa).
+// Re-codifica al vuelo si el archivo guardado es más grande, con caché en memoria.
+let _qrEnvioCache = null; // { mtime, b64, mime }
+async function qrParaEnvio() {
+  const file = pagoQrFile();
+  const st = fs.statSync(file);
+  if (_qrEnvioCache && _qrEnvioCache.mtime === st.mtimeMs) return _qrEnvioCache;
+  let buf = fs.readFileSync(file);
+  let mime = /\.jpe?g$/i.test(file) ? 'image/jpeg' : 'image/png';
+  try {
+    const { Jimp } = require('jimp');
+    const img = await Jimp.read(buf);
+    if (buf.length > 70 * 1024 || img.width > 640 || img.height > 640) {
+      if (img.width > 640 || img.height > 640) img.scaleToFit({ w: 640, h: 640 });
+      buf = await img.getBuffer('image/jpeg', { quality: 80 });
+      mime = 'image/jpeg';
+      console.log(`💳 QR preparado para envío: ${img.width}x${img.height}, ${Math.round(buf.length / 1024)} KB`);
+    }
+  } catch (e) { console.warn('💳 No se pudo reducir el QR para envío (se usa tal cual):', e.message); }
+  _qrEnvioCache = { mtime: st.mtimeMs, b64: buf.toString('base64'), mime };
+  return _qrEnvioCache;
+}
+
 // Devuelve las herramientas activas según lo configurado
 function herramientasActivas() {
   const t = [];
@@ -410,21 +434,12 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   }
   if (nombre === 'enviar_qr_pago') {
     const caption = process.env.PAGO_QR_CAPTION || 'Escanea este código QR desde la app de tu banco para pagar con Bre-B. Llave: @pronetsys';
-    // Preferimos enviar por URL (body diminuto) porque el proxy de openwa rechaza POST grandes (base64).
-    const esJpg = /\.jpe?g$/i.test(pagoQrFile());
-    const ext = esJpg ? 'jpg' : 'png';
-    const mime = esJpg ? 'image/jpeg' : 'image/png';
-    const filename = `pago-pronetsys.${ext}`;
-    const urlExterna = (process.env.PAGO_QR_URL || '').trim();
-    let opts;
-    if (urlExterna) opts = { url: urlExterna, mimetype: mime, filename, caption };
-    else if (state.publicUrl) opts = { url: `${state.publicUrl}/pago/qr.${ext}`, mimetype: mime, filename, caption };
-    else { // último recurso: base64 (puede fallar si la imagen pesa mucho)
-      const base64 = fs.readFileSync(pagoQrFile()).toString('base64');
-      opts = { base64, mimetype: mime, filename, caption };
-    }
-    await sendWhatsAppImage(chatId, opts);
-    console.log(`💳 (chat) ${chatId} recibió el QR de pago`);
+    // Enviar SIEMPRE en base64 reducido a max 640px (~60 KB):
+    // - las imágenes grandes suben corruptas a WhatsApp y el celular dice "descarga fallida"
+    // - reducido cabe bajo el límite de body (~100 KB) del proxy de openwa
+    const qr = await qrParaEnvio();
+    await sendWhatsAppImage(chatId, { base64: qr.b64, mimetype: qr.mime, filename: 'pago-pronetsys.jpg', caption });
+    console.log(`💳 (chat) ${chatId} recibió el QR de pago (${Math.round(qr.b64.length / 1024)} KB base64)`);
     return 'El QR de pago ya se le envió al cliente como imagen (con la llave Bre-B). Solo confirma brevemente; NO repitas el contenido del QR.';
   }
   if (nombre === 'enviar_correo') {
