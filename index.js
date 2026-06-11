@@ -542,25 +542,46 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
   let completion = await openai.chat.completions.create(opciones);
   let msg = completion.choices[0].message;
 
-  // Si el modelo decide usar herramientas, las ejecutamos y volvemos a preguntar
+  // Bucle de herramientas: permite encadenar (ej. consultar_disponibilidad -> agendar_evento)
+  // y, si el modelo ANUNCIA una acción sin invocar la herramienta ("procederé a agendar,
+  // un momento..."), lo OBLIGA a invocarla en este mismo turno (tool_choice: required).
   const ctx = {};
-  if (msg.tool_calls && msg.tool_calls.length) {
-    messages.push(msg);
-    for (const tc of msg.tool_calls) {
-      let resultado;
-      try {
-        resultado = await ejecutarHerramienta(tc.function.name, JSON.parse(tc.function.arguments || '{}'), chatId, ctx);
-      } catch (e) { resultado = 'Error al ejecutar ' + tc.function.name + ': ' + e.message; }
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: resultado });
+  let yaForzado = false;
+  for (let ronda = 0; ronda < 4; ronda++) {
+    if (msg.tool_calls && msg.tool_calls.length) {
+      messages.push(msg);
+      for (const tc of msg.tool_calls) {
+        let resultado;
+        try {
+          resultado = await ejecutarHerramienta(tc.function.name, JSON.parse(tc.function.arguments || '{}'), chatId, ctx);
+        } catch (e) { resultado = 'Error al ejecutar ' + tc.function.name + ': ' + e.message; }
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: resultado });
+      }
+      // Si una herramienta definió una respuesta de formato fijo, se envía tal cual (sin parafraseo del modelo)
+      if (ctx.respuestaDirecta) {
+        await store.append(chatId, 'user', userMessage);
+        await store.append(chatId, 'assistant', ctx.respuestaDirecta);
+        return ctx.respuestaDirecta;
+      }
+      completion = await openai.chat.completions.create({ model: runtime.model, messages, ...(tools.length ? { tools } : {}) });
+      msg = completion.choices[0].message;
+      continue;
     }
-    // Si una herramienta definió una respuesta de formato fijo, se envía tal cual (sin parafraseo del modelo)
-    if (ctx.respuestaDirecta) {
-      await store.append(chatId, 'user', userMessage);
-      await store.append(chatId, 'assistant', ctx.respuestaDirecta);
-      return ctx.respuestaDirecta;
+
+    // Sin tool_calls: ¿anunció una acción que requiere herramienta y no la ejecutó?
+    const texto = msg.content || '';
+    const anuncia = /(proceder[eé]|procedo|voy a|en un momento|un momento|enseguida|ahora (mismo )?(agendo|realizo|consulto|verifico)|permítame (un momento|verificar|consultar))/i.test(texto)
+      && /(agendar|agendo|cancelar|cancelo|disponibilidad|gesti[oó]n|verificar|consultar)/i.test(texto);
+    if (!yaForzado && tools.length && anuncia) {
+      console.warn(`🛟 (chat) ${chatId}: anunció una acción sin invocar herramienta; forzando ejecución`);
+      yaForzado = true;
+      messages.push({ role: 'assistant', content: texto });
+      messages.push({ role: 'system', content: 'ATENCIÓN: anunciaste una acción pero NO invocaste ninguna herramienta, así que NADA ocurrió. Invoca AHORA la herramienta correcta (consultar_disponibilidad, agendar_evento o cancelar_cita) con los datos ya dados en la conversación. No escribas texto.' });
+      completion = await openai.chat.completions.create({ model: runtime.model, messages, tools, tool_choice: 'required' });
+      msg = completion.choices[0].message;
+      continue;
     }
-    completion = await openai.chat.completions.create({ model: runtime.model, messages });
-    msg = completion.choices[0].message;
+    break;
   }
 
   let reply = (msg.content || '').trim();
