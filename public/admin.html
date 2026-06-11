@@ -755,26 +755,76 @@
     });
 
     // ===== Clientes (mini-CRM) =====
+    let cliLista = [];
+    const cliTd = 'padding:8px;border-bottom:1px solid var(--border);vertical-align:top;';
+    function cliRender(editIdx = -1) {
+      const t = $('#cliTabla');
+      if (!cliLista.length) { t.innerHTML = '<tr><td style="color:var(--muted);padding:10px">Aún no hay clientes registrados. El bot los irá guardando a medida que conversen con él.</td></tr>'; return; }
+      const th = '<tr>' + ['Nombre', 'Teléfono', 'Correo', 'Empresa', 'Interfaz', 'Resumen', 'Actualizado', 'Acciones']
+        .map(h => '<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border);white-space:nowrap">' + h + '</th>').join('') + '</tr>';
+      const filas = cliLista.map((c, i) => {
+        const tel = c.telefono || String(c.chat_id || '').split('@')[0] || '';
+        const fecha = String(c.updated || '').slice(0, 16).replace('T', ' ');
+        if (i === editIdx) {
+          return '<tr>' +
+            '<td style="' + cliTd + '"><input id="cliEdNombre" value="' + esc(c.nombre || '') + '" style="min-width:120px;margin:0"></td>' +
+            '<td style="' + cliTd + '"><input id="cliEdTel" value="' + esc(tel) + '" style="min-width:110px;margin:0"></td>' +
+            '<td style="' + cliTd + '"><input id="cliEdEmail" value="' + esc(c.email || '') + '" style="min-width:160px;margin:0"></td>' +
+            '<td style="' + cliTd + '"><input id="cliEdEmpresa" value="' + esc(c.empresa || '') + '" style="min-width:120px;margin:0"></td>' +
+            '<td style="' + cliTd + '">' + esc(c.interfaz || '—') + '</td>' +
+            '<td style="' + cliTd + 'min-width:240px">' + esc(c.resumen || '—') + '</td>' +
+            '<td style="' + cliTd + 'white-space:nowrap">' + esc(fecha) + '</td>' +
+            '<td style="' + cliTd + 'white-space:nowrap">' +
+              '<button type="button" data-acc="guardar" data-i="' + i + '" style="margin:0;padding:6px 12px">💾 Guardar</button> ' +
+              '<button type="button" class="ghost" data-acc="cancelar" style="margin:0;padding:6px 12px">✖</button></td>' +
+          '</tr>';
+        }
+        const celdas = [c.nombre || '—', tel || '—', c.email || '—', c.empresa || '—', c.interfaz || '—', c.resumen || '—', fecha];
+        return '<tr>' + celdas.map((v, j) =>
+          '<td style="' + cliTd + (j === 5 ? 'min-width:240px' : 'white-space:nowrap') + '">' + esc(String(v)) + '</td>'
+        ).join('') +
+          '<td style="' + cliTd + 'white-space:nowrap" class="solo-admin">' +
+            '<button type="button" class="ghost" data-acc="editar" data-i="' + i + '" style="margin:0;padding:4px 10px" title="Editar">✏️</button> ' +
+            '<button type="button" class="ghost" data-acc="borrar" data-i="' + i + '" style="margin:0;padding:4px 10px;color:#c0392b;border-color:#c0392b" title="Eliminar">🗑️</button></td>' +
+        '</tr>';
+      }).join('');
+      t.innerHTML = th + filas;
+    }
     async function cargarClientes() {
       const t = $('#cliTabla');
       try {
         const r = await fetch('/api/admin/clientes');
         if (r.status === 401) { window.location.href = '/login'; return; }
-        const lista = (await r.json()).clientes || [];
-        if (!lista.length) { t.innerHTML = '<tr><td style="color:var(--muted);padding:10px">Aún no hay clientes registrados. El bot los irá guardando a medida que conversen con él.</td></tr>'; return; }
-        const th = '<tr>' + ['Nombre', 'Teléfono', 'Correo', 'Empresa', 'Interfaz', 'Resumen', 'Actualizado']
-          .map(h => '<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border);white-space:nowrap">' + h + '</th>').join('') + '</tr>';
-        const filas = lista.map(c => {
-          const tel = c.telefono || String(c.chat_id || '').split('@')[0] || '—';
-          const celdas = [c.nombre || '—', tel, c.email || '—', c.empresa || '—', c.interfaz || '—',
-            c.resumen || '—', String(c.updated || '').slice(0, 16).replace('T', ' ')];
-          return '<tr>' + celdas.map((v, i) =>
-            '<td style="padding:8px;border-bottom:1px solid var(--border);vertical-align:top;' + (i === 5 ? 'min-width:240px' : 'white-space:nowrap') + '">' + esc(String(v)) + '</td>'
-          ).join('') + '</tr>';
-        }).join('');
-        t.innerHTML = th + filas;
+        cliLista = (await r.json()).clientes || [];
+        cliRender();
       } catch (e) { t.innerHTML = '<tr><td style="padding:10px">Error: ' + esc(e.message) + '</td></tr>'; }
     }
+    $('#cliTabla').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button[data-acc]');
+      if (!btn) return;
+      const acc = btn.dataset.acc, i = parseInt(btn.dataset.i || '-1', 10);
+      const c = cliLista[i];
+      if (acc === 'editar') return cliRender(i);
+      if (acc === 'cancelar') return cliRender();
+      if (acc === 'borrar') {
+        if (!c || !confirm('¿Eliminar la ficha de "' + (c.nombre || c.chat_id) + '"? Esta acción no se puede deshacer.')) return;
+        const r = await fetch('/api/admin/clientes/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chatId: c.chat_id }) });
+        if (r.ok) cargarClientes(); else alert('Error eliminando: ' + ((await r.json()).error || r.status));
+        return;
+      }
+      if (acc === 'guardar') {
+        if (!c) return;
+        const body = {
+          chatId: c.chat_id,
+          nombre: $('#cliEdNombre').value.trim(),
+          telefono: $('#cliEdTel').value.trim(),
+          email: $('#cliEdEmail').value.trim(),
+          empresa: $('#cliEdEmpresa').value.trim(),
+        };
+        const r = await fetch('/api/admin/clientes/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (r.ok) cargarClientes(); else alert('Error guardando: ' + ((await r.json()).error || r.status));
+      }
+    });
 
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });

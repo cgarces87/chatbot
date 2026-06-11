@@ -1417,6 +1417,26 @@ app.get('/api/admin/clientes', authApi, async (_req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/admin/clientes/update', authAdmin, async (req, res) => {
+  try {
+    const { chatId, nombre, telefono, email, empresa } = req.body || {};
+    if (!chatId) return res.status(400).json({ error: 'Falta chatId' });
+    await store.updateCliente(chatId, { nombre, telefono, email, empresa });
+    console.log('🗂️  Ficha de cliente editada desde el panel:', chatId);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/clientes/delete', authAdmin, async (req, res) => {
+  try {
+    const { chatId } = req.body || {};
+    if (!chatId) return res.status(400).json({ error: 'Falta chatId' });
+    await store.deleteCliente(chatId);
+    console.log('🗂️  Ficha de cliente eliminada desde el panel:', chatId);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---- Pagos: QR (Bre-B) ----
 app.get('/api/admin/pagos/status', authApi, (_req, res) => {
   res.json({
