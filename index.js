@@ -1245,17 +1245,33 @@ app.get('/api/admin/pagos/status', authApi, (_req, res) => {
   });
 });
 
-app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), (req, res) => {
+app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
     if (!/^image\//.test(req.file.mimetype || '')) return res.status(400).json({ error: 'El archivo debe ser una imagen (PNG o JPG)' });
-    const ext = /jpe?g/i.test(req.file.mimetype) ? '.jpg' : '.png';
     fs.mkdirSync(path.resolve('data'), { recursive: true });
     // Quitar variantes previas para no dejar dos archivos
     for (const e of ['.png', '.jpg', '.jpeg']) { const p = path.resolve('data/qr-pago' + e); if (fs.existsSync(p)) fs.unlinkSync(p); }
+
+    // Re-codificar SIEMPRE a JPEG estándar (baseline, sin metadatos raros):
+    // garantiza que WhatsApp lo acepte y se pueda descargar sin errores.
+    let buffer = req.file.buffer;
+    let ext = /jpe?g/i.test(req.file.mimetype) ? '.jpg' : '.png';
+    try {
+      const sharp = require('sharp');
+      buffer = await sharp(req.file.buffer)
+        .rotate() // respeta la orientación EXIF y la elimina
+        .resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: '#ffffff' }) // quita transparencia (los PNG pasan a fondo blanco)
+        .jpeg({ quality: 90, progressive: false })
+        .toBuffer();
+      ext = '.jpg';
+      console.log(`💳 QR re-codificado a JPEG estándar (${Math.round(req.file.buffer.length / 1024)} KB -> ${Math.round(buffer.length / 1024)} KB)`);
+    } catch (e) { console.warn('💳 No se pudo re-codificar el QR (se guarda original):', e.message); }
+
     const dest = process.env.PAGO_QR_FILE ? path.resolve(process.env.PAGO_QR_FILE) : path.resolve('data/qr-pago' + ext);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, req.file.buffer);
+    fs.writeFileSync(dest, buffer);
     console.log('💳 QR de pago actualizado:', dest);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1263,15 +1279,13 @@ app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), (req, res) => 
 
 app.get('/api/admin/pagos/qr-img', authApi, (_req, res) => {
   if (!qrDisponible()) return res.status(404).end();
-  res.type(/\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png');
-  fs.createReadStream(pagoQrFile()).pipe(res);
+  res.sendFile(pagoQrFile()); // sendFile pone Content-Type y Content-Length correctos
 });
 
 // Ruta PÚBLICA del QR (sin auth) para que openwa-api la descargue al enviar la imagen
 app.get(['/pago/qr.jpg', '/pago/qr.jpeg', '/pago/qr.png', '/pago/qr.img'], (_req, res) => {
   if (!qrDisponible()) return res.status(404).end();
-  res.type(/\.jpe?g$/i.test(pagoQrFile()) ? 'image/jpeg' : 'image/png');
-  fs.createReadStream(pagoQrFile()).pipe(res);
+  res.sendFile(pagoQrFile());
 });
 
 // ---- Flujo conversacional: leer / guardar ----
