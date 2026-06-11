@@ -1409,6 +1409,14 @@ app.post('/api/admin/smtp/test', authAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---- Clientes (mini-CRM) ----
+app.get('/api/admin/clientes', authApi, async (_req, res) => {
+  try {
+    const clientes = typeof store.listClientes === 'function' ? await store.listClientes(300) : [];
+    res.json({ clientes });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ---- Pagos: QR (Bre-B) ----
 app.get('/api/admin/pagos/status', authApi, (_req, res) => {
   res.json({

@@ -106,6 +106,7 @@
         <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
         <a data-target="correo" data-label="Correo (SMTP)">✉️ Correo</a>
         <a data-target="pagos" data-label="Pagos (QR Bre-B)">💳 Pagos</a>
+        <a data-target="clientes" data-label="Clientes registrados">🗂️ Clientes</a>
       </nav>
       <div class="rol-badge" id="rolBadge" style="display:none"></div>
       <button class="logout" id="logoutBtn">Cerrar sesión</button>
@@ -286,6 +287,19 @@
           </div>
         </section>
 
+        <!-- Clientes (mini-CRM) -->
+        <section data-sec="clientes">
+          <div class="card">
+            <h2>Clientes registrados</h2>
+            <p style="font-size:12px;color:var(--muted);margin:0 0 12px">
+              Fichas que el bot guarda automáticamente durante las conversaciones (nombre, contacto, interés y resumen).
+            </p>
+            <div style="overflow-x:auto">
+              <table id="cliTabla" style="width:100%;border-collapse:collapse;font-size:13px"></table>
+            </div>
+          </div>
+        </section>
+
         <!-- Secciones de configuración se agregan aquí dinámicamente -->
       </div>
     </main>
@@ -323,6 +337,7 @@
       if (secId === 'agenda') cargarAgenda();
       if (secId === 'correo') cargarCorreo();
       if (secId === 'pagos') cargarPagos();
+      if (secId === 'clientes') cargarClientes();
       cerrarMenu();
     }
     document.getElementById('nav').addEventListener('click', (e) => {
@@ -739,10 +754,32 @@
       } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     });
 
+    // ===== Clientes (mini-CRM) =====
+    async function cargarClientes() {
+      const t = $('#cliTabla');
+      try {
+        const r = await fetch('/api/admin/clientes');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const lista = (await r.json()).clientes || [];
+        if (!lista.length) { t.innerHTML = '<tr><td style="color:var(--muted);padding:10px">Aún no hay clientes registrados. El bot los irá guardando a medida que conversen con él.</td></tr>'; return; }
+        const th = '<tr>' + ['Nombre', 'Teléfono', 'Correo', 'Empresa', 'Interfaz', 'Resumen', 'Actualizado']
+          .map(h => '<th style="text-align:left;padding:8px;border-bottom:2px solid var(--border);white-space:nowrap">' + h + '</th>').join('') + '</tr>';
+        const filas = lista.map(c => {
+          const tel = c.telefono || String(c.chat_id || '').split('@')[0] || '—';
+          const celdas = [c.nombre || '—', tel, c.email || '—', c.empresa || '—', c.interfaz || '—',
+            c.resumen || '—', String(c.updated || '').slice(0, 16).replace('T', ' ')];
+          return '<tr>' + celdas.map((v, i) =>
+            '<td style="padding:8px;border-bottom:1px solid var(--border);vertical-align:top;' + (i === 5 ? 'min-width:240px' : 'white-space:nowrap') + '">' + esc(String(v)) + '</td>'
+          ).join('') + '</tr>';
+        }).join('');
+        t.innerHTML = th + filas;
+      } catch (e) { t.innerHTML = '<tr><td style="padding:10px">Error: ' + esc(e.message) + '</td></tr>'; }
+    }
+
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
 
-    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos();
+    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos(); cargarClientes();
     setInterval(cargarEstado, 5000);
   </script>
 </body>
