@@ -232,7 +232,8 @@ if (!ADMIN_PASSWORD) {
   console.warn('⚠️  ADMIN_PASSWORD vacio: el panel quedara accesible sin contraseña. ¡Ponle una!');
 }
 
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+// timeout corto + reintento: si la API de OpenAI se cuelga, no dejamos al cliente esperando para siempre
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY, timeout: 90000, maxRetries: 1 });
 const port = parseInt(PORT, 10) || 3000;
 const store = createStore(process.env);
 
@@ -331,6 +332,26 @@ const HERRAMIENTA_CAL = {
         conMeet: { type: 'boolean', description: 'true si la cita es una reunión virtual/videollamada y debe generar un enlace de Google Meet.' },
       },
       required: ['titulo', 'inicio'],
+    },
+  },
+};
+
+// Herramienta para guardar/actualizar la ficha del cliente (mini-CRM)
+const HERRAMIENTA_CLIENTE = {
+  type: 'function',
+  function: {
+    name: 'guardar_cliente',
+    description: 'Guarda o actualiza la ficha del cliente. Llámala apenas el cliente diga su nombre, correo o empresa, cuando muestre interés en una interfaz, y al cerrar una gestión para actualizar el resumen. Así lo recordaremos en futuros contactos.',
+    parameters: {
+      type: 'object',
+      properties: {
+        nombre: { type: 'string', description: 'Nombre del cliente (si lo dijo).' },
+        email: { type: 'string', description: 'Correo electrónico del cliente (si lo dio).' },
+        empresa: { type: 'string', description: 'Empresa del cliente (si la mencionó).' },
+        interfaz: { type: 'string', description: 'Interfaz de POSFAC en la que mostró interés (si aplica).' },
+        resumen: { type: 'string', description: 'Resumen breve (1-3 frases) de lo conversado y el estado de la gestión.' },
+      },
+      required: [],
     },
   },
 };
@@ -434,7 +455,7 @@ async function qrParaEnvio() {
 
 // Devuelve las herramientas activas según lo configurado
 function herramientasActivas() {
-  const t = [];
+  const t = [HERRAMIENTA_CLIENTE];
   if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR, HERRAMIENTA_DISPONIBILIDAD);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
@@ -459,9 +480,22 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     const ev = await calendar.crearEvento(args);
     console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
     await confirmarCita(ev, { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa });
+    // Actualizar la ficha del cliente automáticamente con lo que dio al agendar
+    try {
+      await store.upsertCliente(chatId, {
+        nombre: args.nombreCliente, email: args.emailCliente, empresa: args.empresa,
+        interfaz: args.interfaz, telefono: telefonoDe(chatId),
+        resumen: `Agendó demo de ${args.interfaz || 'POSFAC'} para ${args.inicio}.`,
+      });
+    } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha del cliente:', e.message); }
     // La confirmación al cliente va con formato fijo (plantilla), no la deja parafrasear el modelo
     ctx.respuestaDirecta = mensajeCitaWhatsApp(ev, args);
     return 'Cita agendada y confirmación enviada al cliente.';
+  }
+  if (nombre === 'guardar_cliente') {
+    await store.upsertCliente(chatId, { ...args, telefono: telefonoDe(chatId) });
+    console.log(`🗂️  (chat) ${chatId} ficha de cliente actualizada`, args.nombre ? `(${args.nombre})` : '');
+    return 'Ficha del cliente guardada. Continúa la conversación con normalidad.';
   }
   if (nombre === 'consultar_disponibilidad') {
     const fecha = String(args.fecha || '').slice(0, 10);
@@ -507,6 +541,20 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
   let sys = systemBase(extraSystem);
 
   const tools = herramientasActivas();
+
+  // Ficha del cliente (mini-CRM): si ya lo conocemos, dárselo al modelo
+  let cliente = null;
+  try { cliente = await store.getCliente(chatId); } catch { /* driver sin soporte */ }
+  if (cliente && (cliente.nombre || cliente.email || cliente.empresa || cliente.interfaz || cliente.resumen)) {
+    const f = [];
+    if (cliente.nombre) f.push(`Nombre: ${cliente.nombre}`);
+    if (cliente.empresa) f.push(`Empresa: ${cliente.empresa}`);
+    if (cliente.email) f.push(`Correo: ${cliente.email}`);
+    if (cliente.interfaz) f.push(`Interfaz de interés: ${cliente.interfaz}`);
+    if (cliente.resumen) f.push(`Resumen de gestiones anteriores: ${cliente.resumen}`);
+    sys += `\n\nCLIENTE CONOCIDO (ficha guardada de contactos anteriores):\n- ${f.join('\n- ')}\nSalúdalo por su nombre y trátalo como cliente que regresa. NO vuelvas a pedirle datos que ya están en la ficha: si los necesitas para agendar, solo confírmalos (ej. "¿le envío la confirmación al correo que tenemos registrado?").`;
+  }
+  sys += `\n\nFICHA DEL CLIENTE: cuando el cliente diga su nombre, correo o empresa, o muestre interés en una interfaz, llama la herramienta "guardar_cliente" con esos datos y un "resumen" breve actualizado de la conversación. Hazlo en el mismo turno en que el dato aparezca.`;
   if (runtime.enableCalendar && calendar.disponible()) {
     const ahora = new Date().toLocaleString('es-CO', { timeZone: calendar.conf.timezone });
     sys += `\n\n=== AGENDAMIENTO DE CITAS (REGLA OBLIGATORIA, PRIORIDAD MÁXIMA) ===
@@ -606,6 +654,9 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
     } catch { /* JSON inválido: solo lo ocultamos */ }
     reply = (reply.slice(0, ini) + reply.slice(fin + 1)).trim(); // nunca mostrar JSON al cliente
   }
+
+  // Nunca devolver vacío (openwa rechaza mensajes sin texto y el cliente quedaría sin respuesta)
+  if (!reply) reply = 'Disculpe, tuve un inconveniente técnico procesando su mensaje. ¿Me lo puede repetir, por favor?';
 
   await store.append(chatId, 'user', userMessage);
   await store.append(chatId, 'assistant', reply);
