@@ -515,6 +515,7 @@ Tienes una herramienta (función) llamada "agendar_evento". Es la ÚNICA forma r
 - Cuando el cliente confirme el motivo/interfaz y un horario, tu siguiente acción DEBE ser llamar la herramienta "agendar_evento" con: titulo, inicio, fin (45 minutos después del inicio), conMeet=true, emailCliente, nombreCliente y empresa.
 - ESTÁ TERMINANTEMENTE PROHIBIDO decir que una cita "quedó agendada", "fue cancelada" o que "se envió un correo de confirmación" si NO has llamado la herramienta en este mismo turno. Afirmarlo sin llamarla es ENGAÑAR al cliente.
 - NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.
+- Las herramientas se usan ÚNICAMENTE invocándolas por function calling. PROHIBIDO escribir JSON, llaves {} o los argumentos de una herramienta en el texto de la respuesta: eso NO ejecuta nada y el cliente lo vería. Tampoco anuncies "voy a agendar" o "ahora realizo la gestión": invoca la herramienta de inmediato, en este mismo turno.
 DISPONIBILIDAD: antes de proponer o confirmar cualquier horario, llama la herramienta "consultar_disponibilidad" con la fecha. PROHIBIDO listar u ofrecer horarios "disponibles" sin haberla llamado: la disponibilidad que no venga de esa herramienta es inventada.
 CANCELAR CITAS: para cancelar una cita usa la herramienta "cancelar_cita". Antes, pídele al cliente la fecha (y hora) de la cita o su correo para ubicarla. PROHIBIDO afirmar que una cita "fue cancelada" sin haber llamado "cancelar_cita" en este turno.`;
   }
@@ -562,7 +563,29 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
     msg = completion.choices[0].message;
   }
 
-  const reply = (msg.content || '').trim();
+  let reply = (msg.content || '').trim();
+
+  // Red de seguridad: si el modelo escribió los argumentos de agendar_evento como
+  // JSON en el texto (en vez de invocar la herramienta), lo detectamos, ejecutamos
+  // la acción REAL y respondemos con la confirmación correcta (el cliente no ve JSON).
+  const ini = reply.indexOf('{'), fin = reply.lastIndexOf('}');
+  if (ini !== -1 && fin > ini && reply.includes('"titulo"') && reply.includes('"inicio"')) {
+    const blob = reply.slice(ini, fin + 1);
+    try {
+      const args = JSON.parse(blob);
+      if (args && args.titulo && args.inicio) {
+        console.warn(`🛟 (chat) ${chatId}: el modelo escribió el JSON como texto; ejecutando agendar_evento de verdad`);
+        const ctx2 = {};
+        const resultado = await ejecutarHerramienta('agendar_evento', args, chatId, ctx2);
+        const final = ctx2.respuestaDirecta || resultado;
+        await store.append(chatId, 'user', userMessage);
+        await store.append(chatId, 'assistant', final);
+        return final;
+      }
+    } catch { /* JSON inválido: solo lo ocultamos */ }
+    reply = (reply.slice(0, ini) + reply.slice(fin + 1)).trim(); // nunca mostrar JSON al cliente
+  }
+
   await store.append(chatId, 'user', userMessage);
   await store.append(chatId, 'assistant', reply);
   return reply;
