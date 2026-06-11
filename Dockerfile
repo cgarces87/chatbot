@@ -13,6 +13,8 @@ WORKDIR /app
 # 1) Instalar dependencias (capa cacheable)
 COPY package*.json ./
 RUN npm install --omit=dev
+# sharp: forzar los binarios de Linux (el lockfile pudo generarse en Windows y omitirlos)
+RUN npm install --no-save --os=linux --cpu=x64 sharp
 
 # 2) Descargar el binario de cloudflared (para el túnel automático)
 RUN node -e "require('cloudflared').install(require('cloudflared').bin).then(()=>console.log('cloudflared listo'))"
