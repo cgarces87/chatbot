@@ -1255,16 +1255,19 @@ app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), async (req, re
 
     // Re-codificar SIEMPRE a JPEG estándar (baseline, sin metadatos raros):
     // garantiza que WhatsApp lo acepte y se pueda descargar sin errores.
+    // (jimp es JavaScript puro: funciona en cualquier CPU, sin binarios nativos)
     let buffer = req.file.buffer;
     let ext = /jpe?g/i.test(req.file.mimetype) ? '.jpg' : '.png';
     try {
-      const sharp = require('sharp');
-      buffer = await sharp(req.file.buffer)
-        .rotate() // respeta la orientación EXIF y la elimina
-        .resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true })
-        .flatten({ background: '#ffffff' }) // quita transparencia (los PNG pasan a fondo blanco)
-        .jpeg({ quality: 90, progressive: false })
-        .toBuffer();
+      const { Jimp } = require('jimp');
+      let img = await Jimp.read(req.file.buffer); // aplica la orientación EXIF al decodificar
+      if (img.width > 1280 || img.height > 1280) img.scaleToFit({ w: 1280, h: 1280 });
+      if (img.hasAlpha()) { // quita transparencia (los PNG pasan a fondo blanco)
+        const fondo = new Jimp({ width: img.width, height: img.height, color: 0xffffffff });
+        fondo.composite(img, 0, 0);
+        img = fondo;
+      }
+      buffer = await img.getBuffer('image/jpeg', { quality: 90 });
       ext = '.jpg';
       console.log(`💳 QR re-codificado a JPEG estándar (${Math.round(req.file.buffer.length / 1024)} KB -> ${Math.round(buffer.length / 1024)} KB)`);
     } catch (e) { console.warn('💳 No se pudo re-codificar el QR (se guarda original):', e.message); }
