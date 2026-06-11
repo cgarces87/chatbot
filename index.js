@@ -136,6 +136,7 @@ function mensajeCitaWhatsApp(evento, datos = {}) {
   if (d.fHoraIni) L.push(`🕐 Hora: ${d.fHoraIni}${d.fHoraFin ? ' – ' + d.fHoraFin : ''} (hora Colombia)`);
   if (d.dur) L.push(`⏱️ Duración: ${d.dur}`);
   if (d.meet) L.push('💻 Modalidad: Virtual por Google Meet', '', '💻 *Enlace de la reunión*', d.meet);
+  if (d.emailCliente) L.push('', `📧 Le enviamos la confirmación con todos los detalles al correo ${d.emailCliente}. Si no la ve en su bandeja de entrada, por favor revise la carpeta de *spam* o correo no deseado.`);
   L.push('', 'Si necesitas reagendar o tienes alguna duda, respóndenos por aquí. ¡Te esperamos! 🙌');
   return L.join('\n');
 }
