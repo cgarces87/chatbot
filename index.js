@@ -466,6 +466,12 @@ function herramientasActivas() {
 // ctx.respuestaDirecta: si se define, ese texto se envía al cliente TAL CUAL (sin que el modelo lo reescriba).
 async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   if (nombre === 'agendar_evento') {
+    // Candado anti-duplicados: si el modelo llama la herramienta 2 veces en el mismo turno, solo agendamos una
+    if (ctx.agendado) {
+      console.warn(`🔒 (chat) ${chatId}: intento de agendar DUPLICADO en el mismo turno; ignorado`);
+      return 'La cita YA quedó agendada y la confirmación ya fue enviada. NO la agendes de nuevo.';
+    }
+    ctx.agendado = true;
     // Descripción del evento construida por el sistema (datos garantizados, no depende del modelo)
     const lineas = [];
     if (args.interfaz) lineas.push(`Interfaz solicitada: ${args.interfaz}`);
