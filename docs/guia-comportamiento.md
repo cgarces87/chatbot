@@ -166,10 +166,12 @@ El agendamiento es una conversación natural, NO un menú ni un formulario. Cuan
 - inicio: fecha y hora de inicio (calculada a partir de la fecha/hora actual del sistema)
 - fin: 45 minutos después del inicio
 - conMeet: true
+- interfaz: nombre de la interfaz que el cliente quiere ver
 - emailCliente: correo del cliente
 - nombreCliente: nombre del contacto
-- empresa: nombre de la empresa
-- descripcion: interfaz solicitada y datos de contacto
+- empresa: nombre de la empresa (si la dio)
+
+La descripción del evento la arma el sistema automáticamente con la interfaz, el contacto, la empresa, el correo y el número de WhatsApp del solicitante — no necesita redactarla.
 
 Al llamar esa herramienta, el sistema AUTOMÁTICAMENTE crea el evento, asigna el enlace de Google Meet, envía al cliente el correo con la plantilla oficial y le envía la confirmación por WhatsApp con el formato establecido.
 

@@ -245,6 +245,15 @@ const botSent = new Map(); // texto -> expira (timestamp)
 const handoff = new Map();
 // Nombre del contacto por chatId (para mostrar en el panel quién es cada @lid)
 const contactos = new Map();
+const telefonos = new Map(); // chatId -> número de teléfono (si el webhook lo trae)
+
+// Mejor número disponible para un chat: el del webhook, o el del chatId si es @c.us
+function telefonoDe(chatId) {
+  if (!chatId) return '';
+  if (telefonos.has(chatId)) return telefonos.get(chatId);
+  if (chatId.endsWith('@c.us')) return chatId.split('@')[0];
+  return '';
+}
 
 function marcarEnvioBot(text) {
   if (text) botSent.set(text.trim(), Date.now() + 90000);
@@ -314,7 +323,8 @@ const HERRAMIENTA_CAL = {
         inicio: { type: 'string', description: 'Fecha y hora de inicio en ISO 8601, ej. "2026-06-10T15:00:00". Calcúlala a partir de la fecha actual indicada en el sistema.' },
         fin: { type: 'string', description: 'Fecha y hora de fin en ISO 8601 (opcional; si falta dura 1 hora).' },
         todoElDia: { type: 'boolean', description: 'true si es un recordatorio de día completo, sin hora.' },
-        descripcion: { type: 'string', description: 'Detalles opcionales del evento.' },
+        descripcion: { type: 'string', description: 'Detalles adicionales opcionales (NO repitas nombre/empresa/correo/interfaz: el sistema los agrega solo).' },
+        interfaz: { type: 'string', description: 'Nombre de la interfaz de POSFAC que el cliente quiere ver (ej. "Restobar", "POS", "Hospedaje").' },
         emailCliente: { type: 'string', description: 'Correo del cliente para enviarle la confirmación (si lo proporciona).' },
         nombreCliente: { type: 'string', description: 'Nombre del cliente/contacto (si lo proporciona).' },
         empresa: { type: 'string', description: 'Nombre de la empresa del cliente (si lo proporciona).' },
@@ -435,6 +445,17 @@ function herramientasActivas() {
 // ctx.respuestaDirecta: si se define, ese texto se envía al cliente TAL CUAL (sin que el modelo lo reescriba).
 async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   if (nombre === 'agendar_evento') {
+    // Descripción del evento construida por el sistema (datos garantizados, no depende del modelo)
+    const lineas = [];
+    if (args.interfaz) lineas.push(`Interfaz solicitada: ${args.interfaz}`);
+    if (args.nombreCliente) lineas.push(`Contacto: ${args.nombreCliente}`);
+    if (args.empresa) lineas.push(`Empresa: ${args.empresa}`);
+    if (args.emailCliente) lineas.push(`Correo: ${args.emailCliente}`);
+    const tel = telefonoDe(chatId);
+    lineas.push(tel ? `WhatsApp del solicitante: +${tel.replace(/^\+/, '')}` : `Chat de WhatsApp del solicitante: ${chatId}`);
+    if (args.descripcion) lineas.push('', args.descripcion);
+    args.descripcion = lineas.join('\n');
+
     const ev = await calendar.crearEvento(args);
     console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
     await confirmarCita(ev, { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa });
@@ -829,6 +850,9 @@ app.post('/webhook', async (req, res) => {
     // Guardamos el nombre del contacto para mostrarlo en el panel
     const nombreContacto = data.contact?.name || data.contact?.pushName || data.pushName || '';
     if (chatId && nombreContacto) contactos.set(chatId, nombreContacto);
+    // Y su número de teléfono (si el webhook lo trae), para la descripción de las citas
+    const numContacto = data.contact?.number || data.contact?.phone || data.number || '';
+    if (chatId && numContacto) telefonos.set(chatId, String(numContacto));
     // Atendemos chats personales (@c.us / @lid) y, si esta activado en el panel,
     // tambien grupos (@g.us). Siempre ignoramos estados (status@broadcast),
     // canales (@newsletter) y difusiones (@broadcast).
