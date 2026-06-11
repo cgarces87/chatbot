@@ -1277,6 +1277,22 @@ app.post('/api/admin/pagos/qr', authAdmin, upload.single('file'), async (req, re
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/admin/pagos/qr/delete', authAdmin, (_req, res) => {
+  try {
+    let borrado = false;
+    for (const e of ['.png', '.jpg', '.jpeg']) {
+      const p = path.resolve('data/qr-pago' + e);
+      if (fs.existsSync(p)) { fs.unlinkSync(p); borrado = true; }
+    }
+    if (process.env.PAGO_QR_FILE) {
+      const p = path.resolve(process.env.PAGO_QR_FILE);
+      if (fs.existsSync(p)) { fs.unlinkSync(p); borrado = true; }
+    }
+    if (borrado) console.log('💳 QR de pago eliminado');
+    res.json({ ok: true, borrado });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/admin/pagos/qr-img', authApi, (_req, res) => {
   if (!qrDisponible()) return res.status(404).end();
   res.sendFile(pagoQrFile()); // sendFile pone Content-Type y Content-Length correctos
