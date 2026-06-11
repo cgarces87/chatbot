@@ -325,6 +325,22 @@ const HERRAMIENTA_CAL = {
   },
 };
 
+// Herramienta para consultar la disponibilidad real del calendario
+const HERRAMIENTA_DISPONIBILIDAD = {
+  type: 'function',
+  function: {
+    name: 'consultar_disponibilidad',
+    description: 'Consulta en el calendario real qué citas ya están ocupadas en una fecha, para ofrecer al cliente únicamente horarios libres. ÚSALA SIEMPRE antes de proponer o confirmar un horario.',
+    parameters: {
+      type: 'object',
+      properties: {
+        fecha: { type: 'string', description: 'Fecha a consultar en formato YYYY-MM-DD (calculada a partir de la fecha actual del sistema).' },
+      },
+      required: ['fecha'],
+    },
+  },
+};
+
 // Herramienta para cancelar una cita ya agendada
 const HERRAMIENTA_CANCELAR = {
   type: 'function',
@@ -409,7 +425,7 @@ async function qrParaEnvio() {
 // Devuelve las herramientas activas según lo configurado
 function herramientasActivas() {
   const t = [];
-  if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR);
+  if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR, HERRAMIENTA_DISPONIBILIDAD);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
   return t;
@@ -425,6 +441,21 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     // La confirmación al cliente va con formato fijo (plantilla), no la deja parafrasear el modelo
     ctx.respuestaDirecta = mensajeCitaWhatsApp(ev, args);
     return 'Cita agendada y confirmación enviada al cliente.';
+  }
+  if (nombre === 'consultar_disponibilidad') {
+    const fecha = String(args.fecha || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return 'Fecha inválida: usa el formato YYYY-MM-DD.';
+    // Ventana del día en UTC: cubre de sobra el horario laboral de Colombia (UTC-5)
+    const evs = await calendar.listarEventos(fecha + 'T00:00:00Z', fecha + 'T23:59:59Z', 50);
+    const conHora = evs.filter((e) => String(e.inicio || '').includes('T'));
+    console.log(`📅 (chat) ${chatId} consultó disponibilidad del ${fecha}: ${conHora.length} cita(s)`);
+    if (!conHora.length) {
+      return `El ${fecha} no hay citas en el calendario: todo el horario de atención (lunes a viernes, 8:00 a. m. a 6:00 p. m., hora Colombia) está libre.`;
+    }
+    const tz = calendar.conf.timezone || 'America/Bogota';
+    const f = (s) => new Date(s).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz });
+    const ocupados = conHora.map((e) => `${f(e.inicio)} a ${f(e.fin)}`).join(' · ');
+    return `Rangos YA OCUPADOS el ${fecha} (hora Colombia): ${ocupados}. Ofrece únicamente horarios que NO choquen con esos rangos, dentro del horario de atención (lunes a viernes, 8:00 a. m. a 6:00 p. m.).`;
   }
   if (nombre === 'cancelar_cita') {
     const borrados = await calendar.cancelarCita(args);
@@ -463,6 +494,7 @@ Tienes una herramienta (función) llamada "agendar_evento". Es la ÚNICA forma r
 - Cuando el cliente confirme el motivo/interfaz y un horario, tu siguiente acción DEBE ser llamar la herramienta "agendar_evento" con: titulo, inicio, fin (45 minutos después del inicio), conMeet=true, emailCliente, nombreCliente y empresa.
 - ESTÁ TERMINANTEMENTE PROHIBIDO decir que una cita "quedó agendada", "fue cancelada" o que "se envió un correo de confirmación" si NO has llamado la herramienta en este mismo turno. Afirmarlo sin llamarla es ENGAÑAR al cliente.
 - NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.
+DISPONIBILIDAD: antes de proponer o confirmar cualquier horario, llama la herramienta "consultar_disponibilidad" con la fecha. PROHIBIDO listar u ofrecer horarios "disponibles" sin haberla llamado: la disponibilidad que no venga de esa herramienta es inventada.
 CANCELAR CITAS: para cancelar una cita usa la herramienta "cancelar_cita". Antes, pídele al cliente la fecha (y hora) de la cita o su correo para ubicarla. PROHIBIDO afirmar que una cita "fue cancelada" sin haber llamado "cancelar_cita" en este turno.`;
   }
   if (runtime.enableSmtp && mailer.disponible()) {
