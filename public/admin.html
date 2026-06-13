@@ -25,6 +25,14 @@
     nav a { display: flex; align-items: center; gap: 10px; padding: 12px 18px; color: #cdd9ee; cursor: pointer; font-size: 14px; border-left: 3px solid transparent; }
     nav a:hover { background: rgba(255,255,255,.08); color: #fff; }
     nav a.active { background: rgba(255,255,255,.15); color: #fff; border-left-color: #fff; font-weight: 600; }
+    /* Grupos colapsables del menú */
+    .nav-group-title { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 6px; font-size: 11px; letter-spacing: .8px; text-transform: uppercase; color: #8fa6cc; cursor: pointer; user-select: none; font-weight: 700; }
+    .nav-group-title:hover { color: #fff; }
+    .nav-group-title .caret { font-size: 10px; transition: transform .18s; opacity: .8; }
+    .nav-group.collapsed .nav-group-title .caret { transform: rotate(-90deg); }
+    .nav-group.collapsed .nav-group-items { display: none; }
+    .nav-group + .nav-group { border-top: 1px solid rgba(255,255,255,.07); }
+    .nav-group-items a { padding-left: 26px; }
     .logout { margin: 10px 16px 16px; background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
     .logout:hover { background: rgba(255,255,255,.25); }
 
@@ -100,14 +108,33 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand"><img src="/logo.png" alt="Pronetsys" /></div>
       <nav id="nav">
-        <a data-target="estado" data-label="Estado" class="active">📊 Estado</a>
-        <a data-target="flujo" data-label="Flujo conversacional">🧭 Flujo conversacional</a>
-        <a data-target="ignorados" data-label="Números ignorados">🚫 Ignorados</a>
-        <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
-        <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
-        <a data-target="correo" data-label="Correo (SMTP)">✉️ Correo</a>
-        <a data-target="pagos" data-label="Pagos (QR Bre-B)">💳 Pagos</a>
-        <a data-target="clientes" data-label="Clientes registrados">🗂️ Clientes</a>
+        <div class="nav-group" data-group="principal">
+          <div class="nav-group-title">Principal <span class="caret">▾</span></div>
+          <div class="nav-group-items">
+            <a data-target="estado" data-label="Estado" class="active">📊 Estado</a>
+            <a data-target="clientes" data-label="Clientes registrados">🗂️ Clientes</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="conversacion">
+          <div class="nav-group-title">Conversación <span class="caret">▾</span></div>
+          <div class="nav-group-items">
+            <a data-target="flujo" data-label="Flujo conversacional">🧭 Flujo conversacional</a>
+            <a data-target="conocimiento" data-label="Base de conocimiento">📚 Conocimiento</a>
+            <a data-target="ignorados" data-label="Números ignorados">🚫 Ignorados</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="integraciones">
+          <div class="nav-group-title">Integraciones <span class="caret">▾</span></div>
+          <div class="nav-group-items">
+            <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
+            <a data-target="correo" data-label="Correo (SMTP)">✉️ Correo</a>
+            <a data-target="pagos" data-label="Pagos (QR Bre-B)">💳 Pagos</a>
+          </div>
+        </div>
+        <div class="nav-group solo-admin" data-group="configuracion">
+          <div class="nav-group-title">Configuración <span class="caret">▾</span></div>
+          <div class="nav-group-items" id="navConfigItems"></div>
+        </div>
       </nav>
       <div class="rol-badge" id="rolBadge" style="display:none"></div>
       <button class="logout" id="logoutBtn">Cerrar sesión</button>
@@ -332,7 +359,11 @@
       document.querySelectorAll('section[data-sec]').forEach(s => s.classList.toggle('active', s.dataset.sec === secId));
       document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.target === secId));
       const item = document.querySelector(`#nav a[data-target="${secId}"]`);
-      if (item) $('#pageTitle').textContent = item.dataset.label;
+      if (item) {
+        $('#pageTitle').textContent = item.dataset.label;
+        const grupo = item.closest('.nav-group');
+        if (grupo) grupo.classList.remove('collapsed'); // abrir el grupo de la sección activa
+      }
       if (secId === 'ignorados') cargarIgnorados();
       if (secId === 'conocimiento') cargarConocimientoPanel();
       if (secId === 'agenda') cargarAgenda();
@@ -344,6 +375,15 @@
     document.getElementById('nav').addEventListener('click', (e) => {
       const a = e.target.closest('a'); if (a) activar(a.dataset.target);
     });
+    // Grupos colapsables: clic en el título abre/cierra
+    document.querySelectorAll('.nav-group-title').forEach(t => {
+      t.addEventListener('click', () => t.closest('.nav-group').classList.toggle('collapsed'));
+    });
+    // Al inicio: solo abierto el grupo que contiene la sección activa
+    function colapsarMenuInicial() {
+      document.querySelectorAll('.nav-group').forEach(g => g.classList.toggle('collapsed', !g.querySelector('a.active')));
+    }
+    colapsarMenuInicial();
     function abrirMenu() { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); }
     function cerrarMenu() { $('#sidebar').classList.remove('open'); $('#overlay').classList.remove('show'); }
     $('#menuToggle').addEventListener('click', abrirMenu);
@@ -417,17 +457,17 @@
       const groups = {};
       for (const f of d.fields) (groups[f.group] = groups[f.group] || []).push(f);
 
-      const nav = $('#nav'), content = $('#content');
+      const navCfg = $('#navConfigItems'), content = $('#content');
       // limpiar secciones de config previas
       content.querySelectorAll('section[data-cfg]').forEach(s => s.remove());
-      nav.querySelectorAll('a[data-cfg]').forEach(a => a.remove());
+      navCfg.querySelectorAll('a[data-cfg]').forEach(a => a.remove());
 
       for (const [g, fields] of Object.entries(groups)) {
         const secId = 'cfg-' + slug(g);
         const a = document.createElement('a');
         a.dataset.target = secId; a.dataset.label = g; a.dataset.cfg = '1';
         a.textContent = (ICONS[g] || '📋') + ' ' + g;
-        nav.appendChild(a);
+        navCfg.appendChild(a);
 
         const sec = document.createElement('section');
         sec.dataset.sec = secId; sec.dataset.cfg = '1';
