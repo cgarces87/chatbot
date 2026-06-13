@@ -1133,6 +1133,15 @@ app.post('/api/logout', (_req, res) => {
 // ---- Logo (publico, lo usan el login y el panel) ----
 app.get('/logo.png', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'logo.png')));
 
+// ---- Favicon (publico): sirve favicon.png o favicon.ico segun exista ----
+app.get(['/favicon.ico', '/favicon.png'], (_req, res) => {
+  for (const f of ['favicon.png', 'favicon.ico']) {
+    const p = path.join(__dirname, 'public', f);
+    if (fs.existsSync(p)) return res.sendFile(p);
+  }
+  res.status(404).end();
+});
+
 // ---- Panel (protegido) ----
 app.get('/', (_req, res) => res.redirect('/admin'));
 app.get('/admin', authPage, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
