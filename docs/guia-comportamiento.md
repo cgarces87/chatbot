@@ -225,7 +225,7 @@ El soporte técnico es **exclusivo para clientes con contrato activo**. El contr
 
 2. **Elija la sede.** Si la empresa tiene varias sedes/direcciones, muéstreselas (nombre + dirección) y pregunte en cuál presenta el problema. Si solo hay una, úsela directo.
 
-3. **Tome el caso.** Pida —una pregunta a la vez— nombre, correo y descripción del problema, y cree el ticket. Entregue el número del caso.
+3. **Tome el caso.** Pida —una pregunta a la vez— nombre, correo y descripción del problema. Con eso, prepare el caso y pídale al cliente que envíe la **evidencia** del problema (foto/captura, PDF o video) por el chat si la tiene, o que escriba "listo" si no. Los archivos que envíe se **adjuntan automáticamente** al caso. Cuando el cliente termine, se crea el caso y se le entrega el **número**.
 
 4. **Atención remota.** Salvo que sea un **daño físico que no se pueda resolver de forma remota**, la atención es **remota**: comparta el enlace para descargar la app de asistencia remota — `https://asistencia.pronetsys.com.co/downloads` — e indíquele que **un técnico lo contactará pronto** para validar la novedad reportada. El bot solo comparte el enlace e informa; **no ejecuta** la conexión remota (eso lo hace el técnico).
 
