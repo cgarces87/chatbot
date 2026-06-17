@@ -58,6 +58,13 @@ const nit = process.argv[2];
     }
   }
 
+  console.log('\n== 4b) Dirección propia de la entidad ==');
+  console.log('   ' + [raw.address, raw.town, raw.state, raw.country].filter(Boolean).join(', ') || '   (sin dirección)');
+
+  console.log('\n== 4c) Sub-entidades (posibles sedes) ==');
+  const subs = await glpi.listarSubentidades(ent.id);
+  console.log(subs.length ? JSON.stringify(subs, null, 2) : '   (sin sub-entidades)');
+
   console.log('\n== 5) Tickets ABIERTOS de la entidad ==');
   const tickets = await glpi.listarTicketsAbiertos(ent.id);
   console.log(tickets.length ? JSON.stringify(tickets, null, 2) : '   (sin tickets abiertos)');
