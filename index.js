@@ -421,21 +421,34 @@ const HERRAMIENTA_CORREO = {
   },
 };
 
-// Herramientas de soporte (GLPI): crear y consultar tickets
+// Herramientas de soporte (GLPI): identificar entidad, crear y consultar tickets
+const HERRAMIENTA_BUSCAR_ENTIDAD = {
+  type: 'function',
+  function: {
+    name: 'buscar_entidad',
+    description: 'Busca la empresa/entidad del cliente en GLPI por su NIT (que el cliente DEBE proporcionar). Devuelve el nombre y la lista de sedes/direcciones para elegir. Es OBLIGATORIO llamarla antes de crear o consultar cualquier ticket.',
+    parameters: {
+      type: 'object',
+      properties: { nit: { type: 'string', description: 'NIT que el cliente proporcionó.' } },
+      required: ['nit'],
+    },
+  },
+};
 const HERRAMIENTA_TICKET_CREAR = {
   type: 'function',
   function: {
     name: 'crear_ticket',
-    description: 'Crea un ticket de soporte en GLPI cuando un cliente reporta una falla o problema técnico. Antes de llamarla, el cliente debe haber dado su nombre, su correo y la descripción del problema.',
+    description: 'Crea un ticket de soporte en GLPI. Solo después de identificar la entidad (buscar_entidad), elegir la sede y tener nombre, correo y descripción del problema.',
     parameters: {
       type: 'object',
       properties: {
+        entityId: { type: 'number', description: 'id de la sede/entidad elegida (de buscar_entidad). El ticket se crea en esa entidad.' },
         titulo: { type: 'string', description: 'Resumen corto del problema (una línea).' },
-        descripcion: { type: 'string', description: 'Descripción detallada del problema reportado por el cliente.' },
+        descripcion: { type: 'string', description: 'Descripción detallada del problema reportado.' },
         nombreCliente: { type: 'string', description: 'Nombre del cliente que reporta.' },
         emailCliente: { type: 'string', description: 'Correo del cliente que reporta.' },
       },
-      required: ['titulo', 'descripcion'],
+      required: ['entityId', 'titulo', 'descripcion'],
     },
   },
 };
@@ -443,13 +456,26 @@ const HERRAMIENTA_TICKET_ESTADO = {
   type: 'function',
   function: {
     name: 'consultar_ticket',
-    description: 'Consulta el estado de un ticket de soporte de GLPI por su número.',
+    description: 'Consulta el estado de un ticket por su número, SOLO dentro de la entidad ya identificada (aislamiento). Requiere haber llamado buscar_entidad antes.',
     parameters: {
       type: 'object',
       properties: {
         numero: { type: 'string', description: 'Número del ticket a consultar.' },
+        entityId: { type: 'number', description: 'id de la entidad del cliente (de buscar_entidad). Obligatorio para aislar.' },
       },
-      required: ['numero'],
+      required: ['numero', 'entityId'],
+    },
+  },
+};
+const HERRAMIENTA_CASOS_ABIERTOS = {
+  type: 'function',
+  function: {
+    name: 'listar_casos_abiertos',
+    description: 'Lista los tickets ABIERTOS de la entidad del cliente (con su último comentario), para cuando el cliente no sabe el número de su caso. Requiere haber identificado la entidad con buscar_entidad.',
+    parameters: {
+      type: 'object',
+      properties: { entityId: { type: 'number', description: 'id de la entidad del cliente (de buscar_entidad).' } },
+      required: ['entityId'],
     },
   },
 };
@@ -505,7 +531,7 @@ function herramientasActivas() {
   if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR, HERRAMIENTA_DISPONIBILIDAD);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
-  if (runtime.enableGlpi && glpi.disponible()) t.push(HERRAMIENTA_TICKET_CREAR, HERRAMIENTA_TICKET_ESTADO);
+  if (runtime.enableGlpi && glpi.disponible()) t.push(HERRAMIENTA_BUSCAR_ENTIDAD, HERRAMIENTA_TICKET_CREAR, HERRAMIENTA_TICKET_ESTADO, HERRAMIENTA_CASOS_ABIERTOS);
   return t;
 }
 
@@ -581,14 +607,28 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     console.log(`💳 (chat) ${chatId} recibió el QR de pago (${Math.round(qr.b64.length / 1024)} KB base64)`);
     return 'El QR de pago ya se le envió al cliente como imagen (con la llave Bre-B). Solo confirma brevemente; NO repitas el contenido del QR.';
   }
+  if (nombre === 'buscar_entidad') {
+    const cli = await glpi.resolverCliente(args.nit);
+    if (!cli) {
+      console.log(`🎫 (chat) ${chatId} NIT no encontrado: ${args.nit}`);
+      return `No se encontró ninguna empresa registrada con el NIT ${args.nit}. Pídele al cliente que verifique el NIT. NO ofrezcas buscar por otros medios ni reveles otras empresas.`;
+    }
+    console.log(`🎫 (chat) ${chatId} entidad: ${cli.nombre} (${cli.ubicaciones.length} sede/s)`);
+    const sedes = cli.ubicaciones.map((u, i) => `  ${i + 1}. ${u.nombre}${u.direccion ? ' — ' + u.direccion : ''} [entityId=${u.id}]`).join('\n');
+    return `Empresa encontrada: "${cli.nombre}".\nSedes/direcciones disponibles:\n${sedes}\n\n`
+      + (cli.ubicaciones.length > 1
+        ? 'Pregúntale al cliente EN CUÁL sede presenta el problema (muéstrale la lista con sus direcciones, sin los entityId) y usa el entityId de la que elija.'
+        : 'Solo hay una sede; usa ese entityId directamente, sin preguntar.')
+      + ' SOLO puedes trabajar con esta empresa; nunca menciones ni uses datos de otras entidades.';
+  }
   if (nombre === 'crear_ticket') {
     const tel = telefonoDe(chatId);
     const contenido = `${args.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
       + `Nombre: ${args.nombreCliente || '(no proporcionado)'}\n`
       + `Correo: ${args.emailCliente || '(no proporcionado)'}\n`
       + `WhatsApp: ${tel ? '+' + tel : chatId}`;
-    const t = await glpi.crearTicket({ titulo: args.titulo, descripcion: contenido });
-    console.log(`🎫 (chat) ${chatId} creó ticket de soporte #${t.id}`);
+    const t = await glpi.crearTicket({ titulo: args.titulo, descripcion: contenido, entityId: args.entityId });
+    console.log(`🎫 (chat) ${chatId} creó ticket #${t.id} en entidad ${args.entityId}`);
     try {
       await store.upsertCliente(chatId, {
         nombre: args.nombreCliente, email: args.emailCliente, telefono: tel,
@@ -598,10 +638,22 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     return `Ticket de soporte creado con el número *#${t.id}*. Dale ese número al cliente y dile que con él puede consultar el estado cuando quiera.`;
   }
   if (nombre === 'consultar_ticket') {
-    const t = await glpi.estadoTicket(args.numero);
-    if (!t) return `No se encontró ningún ticket con el número #${args.numero}. Verifica el número con el cliente.`;
+    const t = await glpi.estadoTicket(args.numero, args.entityId);
+    if (!t) return `No se encontró el ticket #${args.numero} para esta empresa. Verifica el número con el cliente (no reveles información de otras entidades).`;
     console.log(`🎫 (chat) ${chatId} consultó ticket #${t.id} -> ${t.estado}`);
     return `Ticket #${t.id} "${t.titulo}": estado actual *${t.estado}*. Infórmaselo al cliente.`;
+  }
+  if (nombre === 'listar_casos_abiertos') {
+    const lista = await glpi.listarTicketsAbiertos(args.entityId);
+    if (!lista.length) return 'La empresa no tiene casos abiertos actualmente. Infórmaselo al cliente.';
+    // Traer el último comentario de cada uno (en paralelo)
+    const conComentario = await Promise.all(lista.slice(0, 10).map(async (t) => {
+      let ultimo = null;
+      try { ultimo = await glpi.ultimoComentario(t.id); } catch { /* sin comentario */ }
+      return `#${t.id} "${t.titulo}" — estado: ${t.estado}` + (ultimo ? `\n   Último comentario: ${ultimo.contenido.slice(0, 200)}` : '\n   (sin comentarios aún)');
+    }));
+    console.log(`🎫 (chat) ${chatId} listó ${lista.length} caso(s) abierto(s) de entidad ${args.entityId}`);
+    return `Casos abiertos de la empresa (preséntaselos al cliente de forma clara):\n${conComentario.join('\n')}`;
   }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
@@ -658,7 +710,21 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
     if (qrDisponible() || wompi) sys += pagos;
   }
   if (runtime.enableGlpi && glpi.disponible()) {
-    sys += `\n\nSOPORTE (tickets GLPI): si un cliente reporta una falla o problema técnico, ofrécele crear un ticket de soporte. ANTES de crearlo, pídele —una pregunta a la vez— su NOMBRE, su CORREO y una DESCRIPCIÓN del problema. Cuando tengas los tres, llama la herramienta "crear_ticket" y dale al cliente el número que devuelva. Si el cliente quiere saber el estado de un ticket, pídele el número y llama "consultar_ticket". PROHIBIDO inventar números de ticket o estados: usa solo lo que devuelvan las herramientas.`;
+    sys += `\n\n=== SOPORTE (tickets GLPI) — REGLAS ESTRICTAS ===
+Para CUALQUIER gestión de soporte (crear o consultar tickets) sigue este orden, sin saltarte pasos:
+
+1) IDENTIFICAR LA EMPRESA: pídele al cliente el NIT de su empresa (SIEMPRE lo proporciona él; nunca lo adivines ni lo sugieras). Llama "buscar_entidad" con ese NIT.
+   - Si no se encuentra, infórmalo y pídele verificar el NIT. No ofrezcas alternativas ni busques de otra forma.
+
+2) ELEGIR SEDE: si la empresa tiene varias sedes/direcciones, muéstraselas (nombre + dirección, NUNCA los entityId) y pregúntale en cuál presenta el problema. Si solo hay una, úsala directo.
+
+3a) CREAR TICKET: si reporta una falla, pídele —una pregunta a la vez— su NOMBRE, su CORREO y la DESCRIPCIÓN del problema. Con eso llama "crear_ticket" usando el entityId de la sede elegida. Entrégale el número que devuelva.
+
+3b) CONSULTAR ESTADO:
+   - Si sabe el número del caso: llama "consultar_ticket" con el número y el entityId de su empresa.
+   - Si NO sabe el número: llama "listar_casos_abiertos" con el entityId y muéstrale sus casos abiertos con el último comentario.
+
+AISLAMIENTO (CRÍTICO): solo puedes dar información de la empresa cuyo NIT entregó el cliente en ESTA conversación. PROHIBIDO revelar, listar o insinuar qué otras empresas/entidades existen, aunque lo pidan. PROHIBIDO dar información de tickets de otra empresa. PROHIBIDO inventar números de ticket, estados o comentarios: usa solo lo que devuelvan las herramientas.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
