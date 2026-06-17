@@ -24,6 +24,7 @@ const cfg = require('./lib/config');
 const flow = require('./lib/flow');
 const calendar = require('./lib/calendar');
 const mailer = require('./lib/mailer');
+const glpi = require('./lib/glpi');
 
 // ---------------- Configuracion fija (.env) ----------------
 const {
@@ -63,7 +64,18 @@ const runtime = {
   enableCalendar: (process.env.ENABLE_CALENDAR ?? 'false') === 'true',
   enableSmtp: (process.env.ENABLE_SMTP ?? 'false') === 'true',
   enablePagos: (process.env.ENABLE_PAGOS ?? 'false') === 'true',
+  enableGlpi: (process.env.ENABLE_GLPI ?? 'false') === 'true',
 };
+
+// Configura el módulo de GLPI (tickets de soporte) con los valores del entorno
+function configurarGlpi() {
+  glpi.configurar({
+    url: process.env.GLPI_URL || '',
+    appToken: process.env.GLPI_APP_TOKEN || '',
+    userToken: process.env.GLPI_USER_TOKEN || '',
+  });
+}
+configurarGlpi();
 
 // Configura el módulo de Google Calendar con los valores del entorno
 function configurarCalendario() {
@@ -409,6 +421,39 @@ const HERRAMIENTA_CORREO = {
   },
 };
 
+// Herramientas de soporte (GLPI): crear y consultar tickets
+const HERRAMIENTA_TICKET_CREAR = {
+  type: 'function',
+  function: {
+    name: 'crear_ticket',
+    description: 'Crea un ticket de soporte en GLPI cuando un cliente reporta una falla o problema técnico. Antes de llamarla, el cliente debe haber dado su nombre, su correo y la descripción del problema.',
+    parameters: {
+      type: 'object',
+      properties: {
+        titulo: { type: 'string', description: 'Resumen corto del problema (una línea).' },
+        descripcion: { type: 'string', description: 'Descripción detallada del problema reportado por el cliente.' },
+        nombreCliente: { type: 'string', description: 'Nombre del cliente que reporta.' },
+        emailCliente: { type: 'string', description: 'Correo del cliente que reporta.' },
+      },
+      required: ['titulo', 'descripcion'],
+    },
+  },
+};
+const HERRAMIENTA_TICKET_ESTADO = {
+  type: 'function',
+  function: {
+    name: 'consultar_ticket',
+    description: 'Consulta el estado de un ticket de soporte de GLPI por su número.',
+    parameters: {
+      type: 'object',
+      properties: {
+        numero: { type: 'string', description: 'Número del ticket a consultar.' },
+      },
+      required: ['numero'],
+    },
+  },
+};
+
 // Herramienta para enviar el QR de pago (Bre-B) como imagen
 const HERRAMIENTA_QR = {
   type: 'function',
@@ -460,6 +505,7 @@ function herramientasActivas() {
   if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR, HERRAMIENTA_DISPONIBILIDAD);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
+  if (runtime.enableGlpi && glpi.disponible()) t.push(HERRAMIENTA_TICKET_CREAR, HERRAMIENTA_TICKET_ESTADO);
   return t;
 }
 
@@ -535,6 +581,28 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     console.log(`💳 (chat) ${chatId} recibió el QR de pago (${Math.round(qr.b64.length / 1024)} KB base64)`);
     return 'El QR de pago ya se le envió al cliente como imagen (con la llave Bre-B). Solo confirma brevemente; NO repitas el contenido del QR.';
   }
+  if (nombre === 'crear_ticket') {
+    const tel = telefonoDe(chatId);
+    const contenido = `${args.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
+      + `Nombre: ${args.nombreCliente || '(no proporcionado)'}\n`
+      + `Correo: ${args.emailCliente || '(no proporcionado)'}\n`
+      + `WhatsApp: ${tel ? '+' + tel : chatId}`;
+    const t = await glpi.crearTicket({ titulo: args.titulo, descripcion: contenido });
+    console.log(`🎫 (chat) ${chatId} creó ticket de soporte #${t.id}`);
+    try {
+      await store.upsertCliente(chatId, {
+        nombre: args.nombreCliente, email: args.emailCliente, telefono: tel,
+        resumen: `Creó ticket de soporte #${t.id}: ${args.titulo}`,
+      });
+    } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha tras crear ticket:', e.message); }
+    return `Ticket de soporte creado con el número *#${t.id}*. Dale ese número al cliente y dile que con él puede consultar el estado cuando quiera.`;
+  }
+  if (nombre === 'consultar_ticket') {
+    const t = await glpi.estadoTicket(args.numero);
+    if (!t) return `No se encontró ningún ticket con el número #${args.numero}. Verifica el número con el cliente.`;
+    console.log(`🎫 (chat) ${chatId} consultó ticket #${t.id} -> ${t.estado}`);
+    return `Ticket #${t.id} "${t.titulo}": estado actual *${t.estado}*. Infórmaselo al cliente.`;
+  }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
     console.log(`✉️  (chat) ${chatId} envió correo a ${args.para}`);
@@ -588,6 +656,9 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
       pagos += ` Si el cliente prefiere pagar en línea (tarjeta de crédito/débito o PSE), compártele este enlace de pago de la pasarela Wompi: ${wompi} — aclárale que este medio tiene un costo adicional por comisión de la pasarela: 2.65% + $700 + IVA por transacción exitosa.`;
     }
     if (qrDisponible() || wompi) sys += pagos;
+  }
+  if (runtime.enableGlpi && glpi.disponible()) {
+    sys += `\n\nSOPORTE (tickets GLPI): si un cliente reporta una falla o problema técnico, ofrécele crear un ticket de soporte. ANTES de crearlo, pídele —una pregunta a la vez— su NOMBRE, su CORREO y una DESCRIPCIÓN del problema. Cuando tengas los tres, llama la herramienta "crear_ticket" y dale al cliente el número que devuelva. Si el cliente quiere saber el estado de un ticket, pídele el número y llama "consultar_ticket". PROHIBIDO inventar números de ticket o estados: usa solo lo que devuelvan las herramientas.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
@@ -1228,6 +1299,8 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (updates.ENABLE_SMTP !== undefined) runtime.enableSmtp = updates.ENABLE_SMTP === 'true';
     if (['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM'].some(k => updates[k] !== undefined)) configurarCorreo();
     if (updates.ENABLE_PAGOS !== undefined) runtime.enablePagos = updates.ENABLE_PAGOS === 'true';
+    if (updates.ENABLE_GLPI !== undefined) runtime.enableGlpi = updates.ENABLE_GLPI === 'true';
+    if (['GLPI_URL', 'GLPI_APP_TOKEN', 'GLPI_USER_TOKEN'].some(k => updates[k] !== undefined)) configurarGlpi();
 
     // Cambio de sesión de WhatsApp EN VIVO: mueve el webhook a la nueva sesión
     if (updates.OPENWA_SESSION_ID !== undefined && updates.OPENWA_SESSION_ID !== runtime.sessionId) {
@@ -1418,6 +1491,15 @@ app.post('/api/admin/smtp/test', authAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---- Soporte GLPI ----
+app.get('/api/admin/glpi/status', authApi, async (_req, res) => {
+  let info = null, error = null;
+  if (glpi.disponible()) {
+    try { info = await glpi.probar(); } catch (e) { error = e.message; }
+  }
+  res.json({ enabled: runtime.enableGlpi, configurado: glpi.disponible(), url: glpi.conf.url, info, error });
+});
+
 // ---- Clientes (mini-CRM) ----
 app.get('/api/admin/clientes', authApi, async (_req, res) => {
   try {
@@ -1562,6 +1644,7 @@ let tunnelProc = null;
   console.log(`📚 Base de conocimiento: ${runtime.knowledge ? runtime.knowledge.length + ' caracteres' : 'vacía'}`);
   console.log(`📅 Calendario: ${runtime.enableCalendar ? (calendar.disponible() ? 'ACTIVO (herramienta agendar_evento disponible)' : 'activado pero SIN credenciales/ID') : 'desactivado'}`);
   console.log(`✉️  Correo SMTP: ${runtime.enableSmtp ? (mailer.disponible() ? 'ACTIVO' : 'activado pero sin host/usuario/clave') : 'desactivado'}`);
+  console.log(`🎫 Soporte GLPI: ${runtime.enableGlpi ? (glpi.disponible() ? 'ACTIVO (tickets disponibles)' : 'activado pero sin URL/tokens') : 'desactivado'}`);
   console.log(`🔧 Herramientas del bot activas: ${herramientasActivas().map((t) => t.function.name).join(', ') || 'NINGUNA'}`);
 
   app.listen(port, async () => {

@@ -129,6 +129,7 @@
             <a data-target="agenda" data-label="Agenda (Google Calendar)">📅 Agenda</a>
             <a data-target="correo" data-label="Correo (SMTP)">✉️ Correo</a>
             <a data-target="pagos" data-label="Pagos (QR Bre-B)">💳 Pagos</a>
+            <a data-target="soporte" data-label="Soporte (GLPI)">🎫 Soporte</a>
           </div>
         </div>
         <div class="nav-group solo-admin" data-group="configuracion">
@@ -315,6 +316,17 @@
           </div>
         </section>
 
+        <!-- Soporte / GLPI -->
+        <section data-sec="soporte">
+          <div class="card">
+            <h2>Soporte — Tickets GLPI</h2>
+            <div id="glpiStatus">Cargando…</div>
+            <p style="font-size:12px;color:var(--muted);margin:12px 0 0">
+              Los ajustes (URL y tokens) están en la sección <b>Soporte GLPI</b> de configuración. Cuando esté conectado, el bot podrá <b>crear tickets</b> (pidiendo nombre, correo y descripción) y <b>consultar su estado</b> por número, directamente en el chat.
+            </p>
+          </div>
+        </section>
+
         <!-- Clientes (mini-CRM) -->
         <section data-sec="clientes">
           <div class="card">
@@ -369,6 +381,7 @@
       if (secId === 'agenda') cargarAgenda();
       if (secId === 'correo') cargarCorreo();
       if (secId === 'pagos') cargarPagos();
+      if (secId === 'soporte') cargarSoporte();
       if (secId === 'clientes') cargarClientes();
       cerrarMenu();
     }
@@ -795,6 +808,21 @@
       } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     });
 
+    // ===== Soporte / GLPI =====
+    async function cargarSoporte() {
+      try {
+        const r = await fetch('/api/admin/glpi/status');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const d = await r.json();
+        let html;
+        if (!d.enabled) html = '<span class="dot yellow"></span> Soporte <b>desactivado</b>. Actívalo en la sección <b>Soporte GLPI</b> (configuración).';
+        else if (!d.configurado) html = '<span class="dot red"></span> Falta configurar la URL y los tokens (App-Token y User-Token) en <b>Soporte GLPI</b> (config).';
+        else if (d.error) html = '<span class="dot red"></span> Error de conexión: ' + esc(d.error);
+        else html = '<span class="dot green"></span> Conectado a GLPI como <b>' + esc((d.info && d.info.usuario) || 'cuenta del bot') + '</b> · ' + esc(d.url);
+        $('#glpiStatus').innerHTML = html;
+      } catch (e) { $('#glpiStatus').textContent = 'Error: ' + e.message; }
+    }
+
     // ===== Clientes (mini-CRM) =====
     let cliLista = [];
     const cliTd = 'padding:8px;border-bottom:1px solid var(--border);vertical-align:top;';
@@ -870,7 +898,7 @@
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
 
-    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos(); cargarClientes();
+    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos(); cargarSoporte(); cargarClientes();
     setInterval(cargarEstado, 5000);
   </script>
 </body>
