@@ -641,6 +641,8 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   if (nombre === 'finalizar_ticket') {
     const flujo = ticketEvidencia.get(chatId);
     if (!flujo) return 'No hay un caso en preparación. Recopila los datos y llama "preparar_ticket" primero.';
+    // Aviso inmediato: crear el caso + subir adjuntos tarda unos segundos
+    try { await sendWhatsApp(chatId, 'Perfecto. 🙌 En un momento le envío el número de su caso registrado.'); } catch { /* no bloquea la creación */ }
     const tel = telefonoDe(chatId);
     const contenido = `${flujo.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
       + `Nombre: ${flujo.nombreCliente || '(no proporcionado)'}\n`
