@@ -149,7 +149,7 @@ function mensajeCitaWhatsApp(evento, datos = {}) {
   if (d.dur) L.push(`⏱️ Duración: ${d.dur}`);
   if (d.meet) L.push('💻 Modalidad: Virtual por Google Meet', '', '💻 *Enlace de la reunión*', d.meet);
   if (d.emailCliente) L.push('', `📧 Le enviamos la confirmación con todos los detalles al correo ${d.emailCliente}. Si no la ve en su bandeja de entrada, por favor revise la carpeta de *spam* o correo no deseado.`);
-  L.push('', 'Si necesitas reagendar o tienes alguna duda, respóndenos por aquí. ¡Te esperamos! 🙌');
+  L.push('', 'Si necesita reagendar o tiene alguna duda, respóndanos por aquí. ¡Le esperamos!');
   return L.join('\n');
 }
 
@@ -642,7 +642,7 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     const flujo = ticketEvidencia.get(chatId);
     if (!flujo) return 'No hay un caso en preparación. Recopila los datos y llama "preparar_ticket" primero.';
     // Aviso inmediato: crear el caso + subir adjuntos tarda unos segundos
-    try { await sendWhatsApp(chatId, 'Perfecto. 🙌 En un momento le envío el número de su caso registrado.'); } catch { /* no bloquea la creación */ }
+    try { await sendWhatsApp(chatId, 'Perfecto. En un momento le envío el número de su caso registrado.'); } catch { /* no bloquea la creación */ }
     const tel = telefonoDe(chatId);
     const contenido = `${flujo.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
       + `Nombre: ${flujo.nombreCliente || '(no proporcionado)'}\n`
@@ -1173,7 +1173,7 @@ app.post('/webhook', async (req, res) => {
       const mt = (media.mimetype || '').toLowerCase();
       try {
         if (type === 'image' || mt.startsWith('image/')) {
-          if (!runtime.enableImages) { await sendWhatsApp(chatId, '🤖 No estoy configurado para procesar imágenes. Escríbeme tu consulta en texto. 🙂'); return; }
+          if (!runtime.enableImages) { await sendWhatsApp(chatId, 'Por ahora no proceso imágenes. Por favor escríbame su consulta en texto.'); return; }
           console.log(`🖼️  ${chatId}: [imagen]${text ? ' ' + text : ''}`);
           const reply = await responderImagen(chatId, media.data, media.mimetype, text);
           await sendWhatsApp(chatId, reply);
@@ -1182,7 +1182,7 @@ app.post('/webhook', async (req, res) => {
           return;
         }
         if (type === 'ptt' || type === 'audio' || mt.startsWith('audio/')) {
-          if (!runtime.enableAudio) { await sendWhatsApp(chatId, '🤖 No estoy configurado para procesar audios. Escríbeme tu consulta en texto. 🙂'); return; }
+          if (!runtime.enableAudio) { await sendWhatsApp(chatId, 'Por ahora no proceso audios. Por favor escríbame su consulta en texto.'); return; }
           console.log(`🎤 ${chatId}: [audio] transcribiendo...`);
           const texto = await transcribirAudio(media.data, media.mimetype);
           if (!texto) { await sendWhatsApp(chatId, '🤖 No logré entender el audio. ¿Puedes repetirlo o escribirlo?'); return; }
@@ -1197,7 +1197,7 @@ app.post('/webhook', async (req, res) => {
         return;
       } catch (e) {
         console.error('⚠️  Error procesando media:', e.message);
-        await sendWhatsApp(chatId, '😕 Tuve un problema procesando tu archivo. Intenta de nuevo.');
+        await sendWhatsApp(chatId, 'Tuve un problema procesando su archivo. Por favor inténtelo de nuevo.');
         return;
       }
     }
