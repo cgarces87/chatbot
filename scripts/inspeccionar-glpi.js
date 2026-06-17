@@ -47,9 +47,16 @@ const nit = process.argv[2];
     if (typeof v === 'string' && v.trim() && v.length < 300) console.log('   ' + k + ': ' + v.replace(/\s+/g, ' ').slice(0, 120));
   }
 
-  console.log('\n== 4) Ubicaciones de la entidad ==');
+  console.log('\n== 4) Ubicaciones (sedes/direcciones) de la entidad ==');
   const ubis = await glpi.listarUbicaciones(ent.id);
   console.log(ubis.length ? JSON.stringify(ubis, null, 2) : '   (sin ubicaciones)');
+  const ubisRaw = await glpi.getUbicacionesRaw(ent.id);
+  if (ubisRaw[0]) {
+    console.log('   -- Campos crudos de la 1ª ubicación (para confirmar dónde está la dirección) --');
+    for (const [k, v] of Object.entries(ubisRaw[0])) {
+      if (v !== null && v !== '' && v !== 0 && String(v).length < 120) console.log('      ' + k + ': ' + v);
+    }
+  }
 
   console.log('\n== 5) Tickets ABIERTOS de la entidad ==');
   const tickets = await glpi.listarTicketsAbiertos(ent.id);
