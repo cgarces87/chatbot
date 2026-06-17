@@ -610,8 +610,8 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
   if (nombre === 'buscar_entidad') {
     const cli = await glpi.resolverCliente(args.nit);
     if (!cli) {
-      console.log(`🎫 (chat) ${chatId} NIT no encontrado: ${args.nit}`);
-      return `No se encontró ninguna empresa registrada con el NIT ${args.nit}. Pídele al cliente que verifique el NIT. NO ofrezcas buscar por otros medios ni reveles otras empresas.`;
+      console.log(`🎫 (chat) ${chatId} NIT sin contrato: ${args.nit}`);
+      return `El NIT ${args.nit} NO está registrado = no tiene contrato activo. NO crees ticket. Explícale con cortesía que el soporte técnico es solo para clientes con contrato activo y dale el WhatsApp del asesor: 3014665399 (https://wa.me/573014665399). Permítele verificar el NIT por si lo escribió mal. NO reveles otras empresas.`;
     }
     console.log(`🎫 (chat) ${chatId} entidad: ${cli.nombre} (${cli.ubicaciones.length} sede/s)`);
     const sedes = cli.ubicaciones.map((u, i) => `  ${i + 1}. ${u.nombre}${u.direccion ? ' — ' + u.direccion : ''} [entityId=${u.id}]`).join('\n');
@@ -635,7 +635,7 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
         resumen: `Creó ticket de soporte #${t.id}: ${args.titulo}`,
       });
     } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha tras crear ticket:', e.message); }
-    return `Ticket de soporte creado con el número *#${t.id}*. Dale ese número al cliente y dile que con él puede consultar el estado cuando quiera.`;
+    return `Ticket de soporte creado con el número *#${t.id}*. Dale ese número al cliente. LUEGO, salvo daño físico no resoluble remotamente, indícale que la atención será remota: comparte el enlace https://asistencia.pronetsys.com.co/downloads para descargar la app de asistencia remota y avísale que un técnico lo contactará pronto para validar la novedad.`;
   }
   if (nombre === 'consultar_ticket') {
     const t = await glpi.estadoTicket(args.numero, args.entityId);
@@ -713,12 +713,13 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
     sys += `\n\n=== SOPORTE (tickets GLPI) — REGLAS ESTRICTAS ===
 Para CUALQUIER gestión de soporte (crear o consultar tickets) sigue este orden, sin saltarte pasos:
 
-1) IDENTIFICAR LA EMPRESA: pídele al cliente el NIT de su empresa (SIEMPRE lo proporciona él; nunca lo adivines ni lo sugieras). Llama "buscar_entidad" con ese NIT.
-   - Si no se encuentra, infórmalo y pídele verificar el NIT. No ofrezcas alternativas ni busques de otra forma.
+1) VALIDAR CONTRATO (compuerta): pídele al cliente el NIT de su empresa (SIEMPRE lo proporciona él; nunca lo adivines ni lo sugieras). Llama "buscar_entidad" con ese NIT.
+   - Si se ENCUENTRA = tiene contrato activo → continúa.
+   - Si NO se encuentra = NO tiene contrato activo → NO crees ticket. Explícale con cortesía que el soporte técnico es exclusivo para clientes con contrato activo, y dale el WhatsApp del asesor: 3014665399 (https://wa.me/573014665399). Permítele verificar el NIT por si lo escribió mal.
 
 2) ELEGIR SEDE: si la empresa tiene varias sedes/direcciones, muéstraselas (nombre + dirección, NUNCA los entityId) y pregúntale en cuál presenta el problema. Si solo hay una, úsala directo.
 
-3a) CREAR TICKET: si reporta una falla, pídele —una pregunta a la vez— su NOMBRE, su CORREO y la DESCRIPCIÓN del problema. Con eso llama "crear_ticket" usando el entityId de la sede elegida. Entrégale el número que devuelva.
+3a) CREAR TICKET: si reporta una falla, pídele —una pregunta a la vez— su NOMBRE, su CORREO y la DESCRIPCIÓN del problema. Con eso llama "crear_ticket" usando el entityId de la sede elegida. Entrégale el número que devuelva. LUEGO, salvo que sea un daño físico que no se pueda resolver de forma remota, indícale que la atención será REMOTA: comparte el enlace para descargar la app de asistencia remota (https://asistencia.pronetsys.com.co/downloads) y avísale que un técnico lo contactará pronto para validar la novedad reportada. El bot solo comparte el enlace e informa; NUNCA ejecuta la conexión remota.
 
 3b) CONSULTAR ESTADO:
    - Si sabe el número del caso: llama "consultar_ticket" con el número y el entityId de su empresa.
