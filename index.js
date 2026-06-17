@@ -260,6 +260,7 @@ const handoff = new Map();
 // Nombre del contacto por chatId (para mostrar en el panel quién es cada @lid)
 const contactos = new Map();
 const telefonos = new Map(); // chatId -> número de teléfono (si el webhook lo trae)
+const ticketEvidencia = new Map(); // chatId -> { entityId, titulo, descripcion, nombreCliente, emailCliente, evidencias:[] }
 
 // Mejor número disponible para un chat: el del webhook, o el del chatId si es @c.us
 function telefonoDe(chatId) {
@@ -434,15 +435,15 @@ const HERRAMIENTA_BUSCAR_ENTIDAD = {
     },
   },
 };
-const HERRAMIENTA_TICKET_CREAR = {
+const HERRAMIENTA_TICKET_PREPARAR = {
   type: 'function',
   function: {
-    name: 'crear_ticket',
-    description: 'Crea un ticket de soporte en GLPI. Solo después de identificar la entidad (buscar_entidad), elegir la sede y tener nombre, correo y descripción del problema.',
+    name: 'preparar_ticket',
+    description: 'Prepara el caso de soporte con los datos recopilados y entra en modo evidencia (a partir de ahí, los archivos que envíe el cliente se adjuntan al caso). Llámala apenas tengas entidad/sede, nombre, correo y descripción. NO crea el caso todavía.',
     parameters: {
       type: 'object',
       properties: {
-        entityId: { type: 'number', description: 'id de la sede/entidad elegida (de buscar_entidad). El ticket se crea en esa entidad.' },
+        entityId: { type: 'number', description: 'id de la sede/entidad elegida (de buscar_entidad).' },
         titulo: { type: 'string', description: 'Resumen corto del problema (una línea).' },
         descripcion: { type: 'string', description: 'Descripción detallada del problema reportado.' },
         nombreCliente: { type: 'string', description: 'Nombre del cliente que reporta.' },
@@ -450,6 +451,14 @@ const HERRAMIENTA_TICKET_CREAR = {
       },
       required: ['entityId', 'titulo', 'descripcion'],
     },
+  },
+};
+const HERRAMIENTA_TICKET_FINALIZAR = {
+  type: 'function',
+  function: {
+    name: 'finalizar_ticket',
+    description: 'Crea el caso en GLPI (con la evidencia ya recibida) cuando el cliente indica que terminó de enviar evidencia o que no tiene. Requiere haber llamado preparar_ticket antes.',
+    parameters: { type: 'object', properties: {}, required: [] },
   },
 };
 const HERRAMIENTA_TICKET_ESTADO = {
@@ -531,7 +540,7 @@ function herramientasActivas() {
   if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR, HERRAMIENTA_DISPONIBILIDAD);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
-  if (runtime.enableGlpi && glpi.disponible()) t.push(HERRAMIENTA_BUSCAR_ENTIDAD, HERRAMIENTA_TICKET_CREAR, HERRAMIENTA_TICKET_ESTADO, HERRAMIENTA_CASOS_ABIERTOS);
+  if (runtime.enableGlpi && glpi.disponible()) t.push(HERRAMIENTA_BUSCAR_ENTIDAD, HERRAMIENTA_TICKET_PREPARAR, HERRAMIENTA_TICKET_FINALIZAR, HERRAMIENTA_TICKET_ESTADO, HERRAMIENTA_CASOS_ABIERTOS);
   return t;
 }
 
@@ -621,21 +630,41 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
         : 'Solo hay una sede; usa ese entityId directamente, sin preguntar.')
       + ' SOLO puedes trabajar con esta empresa; nunca menciones ni uses datos de otras entidades.';
   }
-  if (nombre === 'crear_ticket') {
+  if (nombre === 'preparar_ticket') {
+    ticketEvidencia.set(chatId, {
+      entityId: args.entityId, titulo: args.titulo, descripcion: args.descripcion,
+      nombreCliente: args.nombreCliente, emailCliente: args.emailCliente, evidencias: [],
+    });
+    console.log(`🎫 (chat) ${chatId} preparó el caso (esperando evidencia)`);
+    return 'Datos del caso guardados. AHORA dile al cliente que, si tiene evidencia del problema (una foto/captura, PDF o video), la envíe por este chat; y que cuando termine, o si no tiene, escriba "listo". Cuando el cliente lo indique, llama "finalizar_ticket". NO crees el caso aún.';
+  }
+  if (nombre === 'finalizar_ticket') {
+    const flujo = ticketEvidencia.get(chatId);
+    if (!flujo) return 'No hay un caso en preparación. Recopila los datos y llama "preparar_ticket" primero.';
     const tel = telefonoDe(chatId);
-    const contenido = `${args.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
-      + `Nombre: ${args.nombreCliente || '(no proporcionado)'}\n`
-      + `Correo: ${args.emailCliente || '(no proporcionado)'}\n`
+    const contenido = `${flujo.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
+      + `Nombre: ${flujo.nombreCliente || '(no proporcionado)'}\n`
+      + `Correo: ${flujo.emailCliente || '(no proporcionado)'}\n`
       + `WhatsApp: ${tel ? '+' + tel : chatId}`;
-    const t = await glpi.crearTicket({ titulo: args.titulo, descripcion: contenido, entityId: args.entityId });
-    console.log(`🎫 (chat) ${chatId} creó ticket #${t.id} en entidad ${args.entityId}`);
+    const t = await glpi.crearTicket({ titulo: flujo.titulo, descripcion: contenido, entityId: flujo.entityId });
+    let adjuntados = 0;
+    for (const ev of flujo.evidencias) {
+      try { await glpi.adjuntarDocumento(t.id, ev); adjuntados++; }
+      catch (e) { console.warn('📎 No se pudo adjuntar evidencia:', e.message); }
+    }
+    ticketEvidencia.delete(chatId);
+    console.log(`🎫 (chat) ${chatId} creó ticket #${t.id} en entidad ${flujo.entityId} con ${adjuntados}/${flujo.evidencias.length} adjunto(s)`);
     try {
       await store.upsertCliente(chatId, {
-        nombre: args.nombreCliente, email: args.emailCliente, telefono: tel,
-        resumen: `Creó ticket de soporte #${t.id}: ${args.titulo}`,
+        nombre: flujo.nombreCliente, email: flujo.emailCliente, telefono: tel,
+        resumen: `Creó ticket de soporte #${t.id}: ${flujo.titulo}`,
       });
     } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha tras crear ticket:', e.message); }
-    return `Ticket de soporte creado con el número *#${t.id}*. Dale ese número al cliente. LUEGO, salvo daño físico no resoluble remotamente, indícale que la atención será remota: comparte el enlace https://asistencia.pronetsys.com.co/downloads para descargar la app de asistencia remota y avísale que un técnico lo contactará pronto para validar la novedad.`;
+    return `Caso creado con el número *#${t.id}*${adjuntados ? ` (${adjuntados} evidencia(s) adjunta(s))` : ''}.\n`
+      + `Comunícale al cliente, en este orden:\n`
+      + `1) El número de su caso: #${t.id}.\n`
+      + `2) Salvo daño físico no resoluble remotamente, la atención es REMOTA: comparte el enlace https://asistencia.pronetsys.com.co/downloads para descargar la app de asistencia remota, y avísale que un técnico lo contactará pronto para validar la novedad.\n`
+      + `3) Un RESUMEN breve de la atención: empresa, problema reportado y número de caso.`;
   }
   if (nombre === 'consultar_ticket') {
     const t = await glpi.estadoTicket(args.numero, args.entityId);
@@ -719,7 +748,7 @@ Para CUALQUIER gestión de soporte (crear o consultar tickets) sigue este orden,
 
 2) ELEGIR SEDE: si la empresa tiene varias sedes/direcciones, muéstraselas (nombre + dirección, NUNCA los entityId) y pregúntale en cuál presenta el problema. Si solo hay una, úsala directo.
 
-3a) CREAR TICKET: si reporta una falla, pídele —una pregunta a la vez— su NOMBRE, su CORREO y la DESCRIPCIÓN del problema. Con eso llama "crear_ticket" usando el entityId de la sede elegida. Entrégale el número que devuelva. LUEGO, salvo que sea un daño físico que no se pueda resolver de forma remota, indícale que la atención será REMOTA: comparte el enlace para descargar la app de asistencia remota (https://asistencia.pronetsys.com.co/downloads) y avísale que un técnico lo contactará pronto para validar la novedad reportada. El bot solo comparte el enlace e informa; NUNCA ejecuta la conexión remota.
+3a) CREAR CASO: si reporta una falla, pídele —una pregunta a la vez— su NOMBRE, su CORREO y la DESCRIPCIÓN del problema. APENAS tengas los tres (y la sede), llama "preparar_ticket" con el entityId de la sede. Después, pídele al cliente que envíe la EVIDENCIA del problema (foto/captura, PDF o video) por este chat si la tiene, o que escriba "listo" si no tiene. Los archivos que envíe quedan adjuntos automáticamente. Cuando el cliente diga que terminó o que no tiene evidencia, llama "finalizar_ticket": el sistema crea el caso con los adjuntos y te da las instrucciones para cerrar (número de caso + atención remota + resumen). NUNCA ejecutes la conexión remota; solo informas.
 
 3b) CONSULTAR ESTADO:
    - Si sabe el número del caso: llama "consultar_ticket" con el número y el entityId de su empresa.
@@ -1124,6 +1153,20 @@ app.post('/webhook', async (req, res) => {
     // OJO: openwa a veces manda hasMedia=false aunque SI incluya el archivo,
     // por eso detectamos la media por la presencia de media.data.
     const media = data.media;
+
+    // 📎 MODO EVIDENCIA: si hay un caso de soporte en preparación, cualquier archivo
+    // que envíe el cliente se guarda como adjunto del caso (NO va a visión).
+    if (ticketEvidencia.has(chatId) && media && media.data) {
+      const flujo = ticketEvidencia.get(chatId);
+      const mt = (media.mimetype || 'application/octet-stream').split(';')[0];
+      const ext = (mt.split('/')[1] || 'bin').replace(/[^a-z0-9]/gi, '') || 'bin';
+      flujo.evidencias.push({ base64: media.data, mimetype: mt, filename: `evidencia-${flujo.evidencias.length + 1}.${ext}` });
+      console.log(`📎 ${chatId}: evidencia recibida (${flujo.evidencias.length}) [${mt}] para el caso en preparación`);
+      await sendWhatsApp(chatId, `✅ Evidencia recibida (${flujo.evidencias.length}). Si tiene más, envíela; cuando termine escriba *listo* y creo el caso.`);
+      state.messagesHandled++;
+      return;
+    }
+
     if (media && media.data) {
       const mt = (media.mimetype || '').toLowerCase();
       try {
@@ -1162,7 +1205,10 @@ app.post('/webhook', async (req, res) => {
       // Solo avisamos por MEDIA real que un cliente envía y aún no soportamos.
       // Los mensajes de SISTEMA (cifrado e2e, notificaciones, etc.) se ignoran en silencio.
       const mediaNoSoportada = ['video', 'document', 'sticker', 'location', 'vcard', 'contact', 'multi_vcard'];
-      if (mediaNoSoportada.includes(type)) {
+      if (ticketEvidencia.has(chatId) && mediaNoSoportada.includes(type)) {
+        // En modo evidencia pero el archivo llegó sin datos (ej. video muy pesado)
+        await sendWhatsApp(chatId, '⚠️ No pude recibir ese archivo (puede ser muy pesado). Intente con una *foto* o un *PDF* más liviano, o escriba *listo* para crear el caso sin esa evidencia.');
+      } else if (mediaNoSoportada.includes(type)) {
         await sendWhatsApp(chatId, '🤖 Por ahora entiendo texto, imágenes y audios.');
       } else {
         console.log(`ℹ️  Ignorado mensaje de tipo "${type}" (mensaje de sistema, no de usuario)`);
