@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Panel del Chatbot · Pronetsys</title>
   <link rel="icon" href="/favicon.png" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/drawflow@0.0.59/dist/drawflow.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/drawflow@0.0.59/dist/drawflow.min.js"></script>
   <style>
     :root {
       --brand: #144086; --brand-dark: #0e2f63; --brand-accent: #1e5bb8;
@@ -100,6 +102,23 @@
       .card { padding: 16px; }
       button.ghost { margin-left: 0; margin-top: 10px; width: 100%; }
     }
+    /* Editor visual de flujo (Drawflow) */
+    .flow-toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px; }
+    .flow-toolbar button { margin:0; padding:7px 12px; font-size:13px; }
+    .flow-toolbar .sep { flex:1; }
+    #drawflow { width:100%; height:560px; border:1px solid var(--border); border-radius:10px; background:#0b1220; background-image:radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px); background-size:22px 22px; position:relative; }
+    #drawflow .drawflow-node { background:#1b2940; border:1px solid #2c3e5e; color:#e8eefc; border-radius:10px; padding:0; min-width:170px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
+    #drawflow .drawflow-node.selected { border-color:#4f8cff; box-shadow:0 0 0 2px rgba(79,140,255,.5); }
+    #drawflow .drawflow-node .nodebox { padding:10px 12px; }
+    #drawflow .node-tipo { font-size:11px; text-transform:uppercase; letter-spacing:.5px; opacity:.8; font-weight:700; display:flex; justify-content:space-between; gap:6px; }
+    #drawflow .node-txt { font-size:12px; margin-top:5px; color:#cdd9ee; word-break:break-word; max-height:54px; overflow:hidden; }
+    #drawflow .node-edit { cursor:pointer; opacity:.85; }
+    #drawflow .drawflow-node .input, #drawflow .drawflow-node .output { background:#4f8cff; border:2px solid #0b1220; height:14px; width:14px; }
+    #drawflow .connection .main-path { stroke:#4f8cff; stroke-width:2.5px; }
+    .flow-props { margin-top:12px; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--card); display:none; }
+    .flow-props.show { display:block; }
+    .flow-props h3 { margin:0 0 10px; font-size:14px; color:var(--brand); }
+    .flow-props .row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
   </style>
 </head>
 <body>
@@ -171,12 +190,22 @@
         <!-- Flujo -->
         <section data-sec="flujo">
           <div class="card">
-            <h2>Flujo conversacional (menús)</h2>
-            <p style="font-size:13px;color:var(--muted);margin:0 0 8px">
-              Tipo <b>menu</b> = muestra opciones; tipo <b>ai</b> = chat libre con IA. Actívalo en "Comportamiento → Activar flujo de menús".
+            <h2>Flujo conversacional (editor visual)</h2>
+            <p style="font-size:13px;color:var(--muted);margin:0 0 10px">
+              Agregue nodos con los botones, <b>arrástrelos</b> y <b>conéctelos</b> tirando de un punto azul (salida) a otro (entrada). Edite cada nodo con el lápiz ✏️. Actívelo en <b>Comportamiento → Activar flujo de menús</b>.
             </p>
-            <div id="flowEditor">Cargando…</div>
-            <button type="button" id="saveFlowBtn" class="solo-admin">💾 Guardar flujo</button>
+            <div class="flow-toolbar solo-admin">
+              <button type="button" class="ghost" data-add="mensaje">➕ Mensaje</button>
+              <button type="button" class="ghost" data-add="menu">➕ Menú</button>
+              <button type="button" class="ghost" data-add="condicion">➕ Condición</button>
+              <button type="button" class="ghost" data-add="ia">➕ IA</button>
+              <button type="button" class="ghost" data-add="accion">➕ Acción</button>
+              <button type="button" class="ghost" data-add="fin">➕ Fin</button>
+              <span class="sep"></span>
+              <button type="button" id="saveFlowBtn">💾 Guardar flujo</button>
+            </div>
+            <div id="drawflow"></div>
+            <div class="flow-props" id="flowProps"></div>
             <div class="msg" id="flowMsg"></div>
           </div>
         </section>
@@ -378,6 +407,7 @@
       }
       if (secId === 'ignorados') cargarIgnorados();
       if (secId === 'conocimiento') cargarConocimientoPanel();
+      if (secId === 'flujo') cargarFlujoEditor();
       if (secId === 'agenda') cargarAgenda();
       if (secId === 'correo') cargarCorreo();
       if (secId === 'pagos') cargarPagos();
@@ -560,67 +590,202 @@
       finally { btn.disabled = false; }
     }
 
-    // ---- Editor de flujo ----
-    let flowData = null;
-    function nodeIds() { return Object.keys(flowData.nodes); }
+    // ===== Editor visual de flujo (Drawflow) =====
+    let editor = null, flowTriggers = ['menu', 'menú', 'inicio', 'volver'];
+    const TIPO_META = {
+      inicio:   { icon: '🚀', label: 'Inicio',    in: 0, out: 1 },
+      mensaje:  { icon: '💬', label: 'Mensaje',   in: 1, out: 1 },
+      menu:     { icon: '📋', label: 'Menú',      in: 1, out: 1 },
+      condicion:{ icon: '🔀', label: 'Condición', in: 1, out: 1 },
+      ia:       { icon: '🤖', label: 'IA',        in: 1, out: 0 },
+      accion:   { icon: '⚡', label: 'Acción',    in: 1, out: 0 },
+      fin:      { icon: '🏁', label: 'Fin',       in: 1, out: 0 },
+    };
+    function flowPreview(tipo, data) {
+      if (tipo === 'menu' || tipo === 'condicion') return (data.options || []).map(o => '• ' + esc(o.label || o.patrones || '…')).join('<br>') || '(sin opciones)';
+      if (tipo === 'accion') return 'Acción: ' + esc(data.accion || '(ninguna)') + (data.message ? '<br>' + esc(data.message) : '');
+      if (tipo === 'inicio') return '(punto de entrada)';
+      return esc(data.message || '(sin texto)');
+    }
+    function nodeHtml(tipo, data) {
+      const m = TIPO_META[tipo] || { icon: '⬜', label: tipo };
+      return `<div class="nodebox"><div class="node-tipo">${m.icon} ${m.label} <span class="node-edit">✏️</span></div><div class="node-txt">${flowPreview(tipo, data)}</div></div>`;
+    }
+    function refreshNodePreview(dfId) {
+      const nd = editor.getNodeFromId(dfId);
+      const el = document.querySelector('#node-' + dfId + ' .node-txt');
+      if (el) el.innerHTML = flowPreview(nd.name, nd.data || {});
+    }
+
+    function initFlowEditor() {
+      if (editor) return true;
+      if (typeof Drawflow === 'undefined') { $('#drawflow').innerHTML = '<p style="padding:20px;color:#fbb">No se pudo cargar el editor visual (sin internet para la librería Drawflow).</p>'; return false; }
+      editor = new Drawflow(document.getElementById('drawflow'));
+      editor.reroute = true;
+      editor.start();
+      editor.on('nodeSelected', (id) => abrirPropsFlujo(id));
+      editor.on('click', (e) => { if (!e.target.closest('.drawflow-node')) cerrarPropsFlujo(); });
+      // botones de la barra
+      document.querySelectorAll('.flow-toolbar [data-add]').forEach(b =>
+        b.addEventListener('click', () => agregarNodoFlujo(b.dataset.add)));
+      return true;
+    }
+
     async function cargarFlujoEditor() {
-      const r = await fetch('/api/admin/flow');
-      if (r.status === 401) { window.location.href = '/login'; return; }
-      flowData = await r.json();
-      renderFlujo();
-    }
-    function renderFlujo() {
-      let h = '';
-      h += `<label>Nodo inicial</label><select onchange="flowData.start=this.value">` +
-        nodeIds().map(id => `<option ${id === flowData.start ? 'selected' : ''}>${esc(id)}</option>`).join('') + `</select>`;
-      h += `<label>Palabras clave para volver al menú (separadas por coma)</label>` +
-        `<input value="${esc((flowData.triggers || []).join(', '))}" onchange="flowData.triggers=this.value.split(',').map(s=>s.trim()).filter(Boolean)">`;
-      for (const id of nodeIds()) {
-        const n = flowData.nodes[id];
-        h += `<div class="node"><div class="node-head"><b>🔵 ${esc(id)}</b>` +
-          `<button type="button" class="mini danger solo-admin" onclick="borrarNodo('${id}')">Eliminar nodo</button></div>`;
-        h += `<label>Tipo</label><select onchange="flowData.nodes['${id}'].type=this.value; renderFlujo()">` +
-          `<option value="menu" ${n.type==='menu'?'selected':''}>menu (muestra opciones)</option>` +
-          `<option value="ai" ${n.type==='ai'?'selected':''}>ai (chat libre con IA)</option></select>`;
-        h += `<label>Mensaje</label><textarea onchange="flowData.nodes['${id}'].message=this.value">${esc(n.message || '')}</textarea>`;
-        if (n.type === 'ai') {
-          h += `<label>Contexto extra para la IA (opcional)</label>` +
-            `<input value="${esc(n.systemAddon || '')}" onchange="flowData.nodes['${id}'].systemAddon=this.value">`;
-        } else {
-          h += `<label>Opciones</label>`;
-          (n.options || []).forEach((o, i) => {
-            h += `<div class="opt"><input placeholder="Texto de la opción" value="${esc(o.label || '')}" onchange="flowData.nodes['${id}'].options[${i}].label=this.value">` +
-              `<select onchange="flowData.nodes['${id}'].options[${i}].next=this.value">` +
-              nodeIds().map(nid => `<option ${nid===o.next?'selected':''}>${esc(nid)}</option>`).join('') + `</select>` +
-              `<button type="button" class="mini danger solo-admin" onclick="borrarOpcion('${id}',${i})">✕</button></div>`;
-          });
-          h += `<button type="button" class="mini solo-admin" onclick="agregarOpcion('${id}')">+ Agregar opción</button>`;
-        }
-        h += `</div>`;
-      }
-      h += `<button type="button" class="mini solo-admin" onclick="agregarNodo()">+ Agregar nodo</button>`;
-      $('#flowEditor').innerHTML = h;
-    }
-    function borrarNodo(id) { if (id === flowData.start) { alert('No puedes eliminar el nodo inicial.'); return; } delete flowData.nodes[id]; renderFlujo(); }
-    function agregarNodo() {
-      const id = (prompt('ID del nuevo nodo (sin espacios, ej: horarios):') || '').trim();
-      if (!id) return;
-      if (!/^[A-Za-z0-9_]+$/.test(id)) { alert('Usa solo letras, números y _'); return; }
-      if (flowData.nodes[id]) { alert('Ya existe un nodo con ese ID.'); return; }
-      flowData.nodes[id] = { type: 'ai', message: '', systemAddon: '' };
-      renderFlujo();
-    }
-    function agregarOpcion(id) { const n = flowData.nodes[id]; n.options = n.options || []; n.options.push({ key: String(n.options.length+1), label: 'Nueva opción', next: flowData.start }); renderFlujo(); }
-    function borrarOpcion(id, i) { flowData.nodes[id].options.splice(i, 1); renderFlujo(); }
-    async function guardarFlujo() {
-      for (const id of nodeIds()) { const n = flowData.nodes[id]; if (n.type==='menu' && n.options) n.options.forEach((o,i)=>o.key=String(i+1)); }
-      const msg = $('#flowMsg');
+      if (!initFlowEditor()) return;
       try {
-        const r = await fetch('/api/admin/flow', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(flowData) });
+        const r = await fetch('/api/admin/flow');
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        const flow = await r.json();
+        importarFlujo(flow);
+      } catch (e) { $('#flowMsg').className = 'msg err'; $('#flowMsg').style.display = 'block'; $('#flowMsg').textContent = 'Error: ' + e.message; }
+    }
+
+    function importarFlujo(flow) {
+      editor.clear();
+      flowTriggers = flow.triggers || flowTriggers;
+      const map = {}; // flow id -> drawflow id
+      let x = 60, y = 60;
+      // 1) crear nodos
+      for (const [fid, n] of Object.entries(flow.nodes || {})) {
+        const tipo = n.type === 'ai' ? 'ia' : n.type;
+        const m = TIPO_META[tipo] || TIPO_META.mensaje;
+        const out = (tipo === 'menu' || tipo === 'condicion') ? Math.max(1, (n.options || []).length) : m.out;
+        const data = { message: n.message || '', accion: n.accion || '', systemAddon: n.systemAddon || '',
+          options: (n.options || []).map(o => ({ label: o.label || '', patrones: o.patrones || '' })) };
+        map[fid] = editor.addNode(tipo, m.in, out, x, y, tipo, data, nodeHtml(tipo, data), false);
+        x += 240; if (x > 920) { x = 60; y += 180; }
+      }
+      // asegurar un nodo "inicio" que apunte al start
+      const tieneInicio = Object.values(flow.nodes || {}).some(n => n.type === 'inicio');
+      if (!tieneInicio && flow.start && map[flow.start]) {
+        const idIni = editor.addNode('inicio', 0, 1, 20, 20, 'inicio', { message: '', options: [] }, nodeHtml('inicio', {}), false);
+        editor.addConnection(idIni, map[flow.start], 'output_1', 'input_1');
+      }
+      // 2) conexiones
+      for (const [fid, n] of Object.entries(flow.nodes || {})) {
+        const tipo = n.type === 'ai' ? 'ia' : n.type;
+        const src = map[fid];
+        const con = (i, tgt) => { if (tgt && map[tgt]) try { editor.addConnection(src, map[tgt], 'output_' + i, 'input_1'); } catch (e) {} };
+        if (tipo === 'menu' || tipo === 'condicion') (n.options || []).forEach((o, i) => con(i + 1, o.next));
+        else if (n.next) con(1, n.next);
+      }
+    }
+
+    function agregarNodoFlujo(tipo) {
+      if (tipo === 'inicio') { alert('Solo puede haber un nodo Inicio.'); return; }
+      const m = TIPO_META[tipo];
+      const data = { message: '', accion: '', systemAddon: '', options: (tipo === 'menu' || tipo === 'condicion') ? [{ label: 'Opción 1', patrones: '' }] : [] };
+      const out = (tipo === 'menu' || tipo === 'condicion') ? 1 : m.out;
+      const pos = editor.precanvas.getBoundingClientRect();
+      const id = editor.addNode(tipo, m.in, out, 80 - editor.canvas_x / editor.zoom + 40, 80 - editor.canvas_y / editor.zoom + 40, tipo, data, nodeHtml(tipo, data), false);
+      abrirPropsFlujo(id);
+    }
+
+    // ----- Panel de propiedades -----
+    let propsNodeId = null;
+    function cerrarPropsFlujo() { propsNodeId = null; $('#flowProps').classList.remove('show'); }
+    function abrirPropsFlujo(dfId) {
+      propsNodeId = dfId;
+      const nd = editor.getNodeFromId(dfId);
+      const tipo = nd.name, data = nd.data || {};
+      const m = TIPO_META[tipo] || {};
+      let h = `<h3>${m.icon || ''} Nodo: ${m.label || tipo}</h3>`;
+      if (tipo === 'inicio') {
+        h += `<p style="font-size:13px;color:var(--muted)">Es el punto de entrada del flujo. Conéctelo al primer nodo.</p>`;
+      } else if (tipo === 'menu' || tipo === 'condicion') {
+        h += `<label>Mensaje que se muestra</label><textarea id="pMsg">${esc(data.message || '')}</textarea>`;
+        h += `<label>${tipo === 'menu' ? 'Opciones (cada una es una salida →)' : 'Ramas por palabras clave (separe palabras con coma)'}</label><div id="pOpts"></div>`;
+        h += `<button type="button" class="mini" id="pAddOpt">+ Agregar ${tipo === 'menu' ? 'opción' : 'rama'}</button>`;
+      } else if (tipo === 'ia') {
+        h += `<label>Mensaje de entrada (opcional)</label><textarea id="pMsg">${esc(data.message || '')}</textarea>`;
+        h += `<label>Contexto extra para la IA (opcional)</label><input id="pAddon" value="${esc(data.systemAddon || '')}">`;
+      } else if (tipo === 'accion') {
+        h += `<label>Mensaje antes de la acción (opcional)</label><textarea id="pMsg">${esc(data.message || '')}</textarea>`;
+        h += `<label>Acción a ejecutar</label><select id="pAccion">` +
+          ['', 'qr', 'asesor', 'handoff'].map(a => `<option value="${a}" ${data.accion === a ? 'selected' : ''}>${({ '': '(ninguna)', qr: 'Enviar QR de pago', asesor: 'Compartir WhatsApp del asesor', handoff: 'Pasar a atención humana' })[a]}</option>`).join('') + `</select>`;
+      } else { // mensaje / fin
+        h += `<label>Mensaje</label><textarea id="pMsg">${esc(data.message || '')}</textarea>`;
+      }
+      h += `<div class="row" style="margin-top:10px"><button type="button" id="pApply">✔ Aplicar</button>` +
+        `<button type="button" class="ghost danger" id="pDel">🗑️ Eliminar nodo</button></div>`;
+      const box = $('#flowProps'); box.innerHTML = h; box.classList.add('show');
+
+      if (tipo === 'menu' || tipo === 'condicion') renderOpcionesProps(tipo, data);
+      const addOpt = $('#pAddOpt');
+      if (addOpt) addOpt.addEventListener('click', () => {
+        data.options = data.options || []; data.options.push(tipo === 'menu' ? { label: 'Nueva opción' } : { patrones: '' });
+        editor.addNodeOutput(dfId); renderOpcionesProps(tipo, data);
+      });
+      $('#pApply').addEventListener('click', aplicarPropsFlujo);
+      $('#pDel').addEventListener('click', () => { if (confirm('¿Eliminar este nodo?')) { editor.removeNodeId('node-' + dfId); cerrarPropsFlujo(); } });
+    }
+    function renderOpcionesProps(tipo, data) {
+      const cont = $('#pOpts');
+      cont.innerHTML = (data.options || []).map((o, i) =>
+        `<div class="row"><span style="width:22px;color:var(--muted)">${i + 1}.</span>` +
+        `<input data-opt="${i}" value="${esc(tipo === 'menu' ? (o.label || '') : (o.patrones || ''))}" placeholder="${tipo === 'menu' ? 'Texto de la opción' : 'palabra1, palabra2'}">` +
+        (i === (data.options.length - 1) && data.options.length > 1 ? `<button type="button" class="mini danger" data-delopt="${i}">✕</button>` : '') +
+        `</div>`).join('');
+      cont.querySelectorAll('[data-delopt]').forEach(b => b.addEventListener('click', () => {
+        const i = +b.dataset.delopt; data.options.splice(i, 1);
+        editor.removeNodeOutput('node-' + propsNodeId, 'output_' + (i + 1));
+        renderOpcionesProps(tipo, data);
+      }));
+    }
+    function aplicarPropsFlujo() {
+      const nd = editor.getNodeFromId(propsNodeId);
+      const tipo = nd.name, data = nd.data || {};
+      if ($('#pMsg')) data.message = $('#pMsg').value;
+      if ($('#pAddon')) data.systemAddon = $('#pAddon').value;
+      if ($('#pAccion')) data.accion = $('#pAccion').value;
+      if (tipo === 'menu' || tipo === 'condicion') {
+        $('#pOpts').querySelectorAll('[data-opt]').forEach(inp => {
+          const i = +inp.dataset.opt; data.options[i] = data.options[i] || {};
+          if (tipo === 'menu') data.options[i].label = inp.value; else data.options[i].patrones = inp.value;
+        });
+      }
+      editor.updateNodeDataFromId(propsNodeId, data);
+      refreshNodePreview(propsNodeId);
+      $('#flowMsg').className = 'msg ok'; $('#flowMsg').style.display = 'block'; $('#flowMsg').textContent = 'Nodo actualizado (recuerde Guardar el flujo).';
+    }
+
+    // ----- Exportar y guardar -----
+    function exportarFlujo() {
+      const dump = editor.export().drawflow.Home.data;
+      const nodes = {}; let start = null;
+      const fid = (id) => 'n' + id;
+      for (const id of Object.keys(dump)) {
+        const nd = dump[id], tipo = nd.name, data = nd.data || {}, node = { type: tipo };
+        if (tipo === 'inicio') start = fid(id);
+        if (data.message) node.message = data.message;
+        if (tipo === 'ia' && data.systemAddon) node.systemAddon = data.systemAddon;
+        if (tipo === 'accion' && data.accion) node.accion = data.accion;
+        const tgt = (out) => { const c = (nd.outputs[out] && nd.outputs[out].connections) || []; return c.length ? fid(c[0].node) : null; };
+        if (tipo === 'menu' || tipo === 'condicion') {
+          node.options = (data.options || []).map((o, i) => {
+            const next = tgt('output_' + (i + 1));
+            return tipo === 'menu' ? { label: o.label || ('Opción ' + (i + 1)), next } : { patrones: o.patrones || '', next };
+          }).filter(o => o.next);
+        } else if (tipo !== 'ia' && tipo !== 'fin') {
+          const next = tgt('output_1'); if (next) node.next = next;
+        }
+        nodes[fid(id)] = node;
+      }
+      if (!start) start = Object.keys(nodes)[0];
+      return { start, triggers: flowTriggers, nodes };
+    }
+    async function guardarFlujo() {
+      const msg = $('#flowMsg'); msg.style.display = 'block';
+      let flow;
+      try { flow = exportarFlujo(); } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; return; }
+      if (!flow.start) { msg.className = 'msg err'; msg.textContent = '❌ El flujo necesita al menos un nodo.'; return; }
+      try {
+        const r = await fetch('/api/admin/flow', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(flow) });
         const d = await r.json();
-        if (r.ok) { msg.className='msg ok'; msg.textContent='✅ Flujo guardado y aplicado.'; }
-        else { msg.className='msg err'; msg.textContent='❌ ' + (d.error||'Error'); }
-      } catch (e) { msg.className='msg err'; msg.textContent='❌ ' + e.message; }
+        if (r.ok) { msg.className = 'msg ok'; msg.textContent = '✅ Flujo guardado y aplicado.'; }
+        else { msg.className = 'msg err'; msg.textContent = '❌ ' + (d.error || 'Error'); }
+      } catch (e) { msg.className = 'msg err'; msg.textContent = '❌ ' + e.message; }
     }
     $('#saveFlowBtn').addEventListener('click', guardarFlujo);
 
@@ -898,7 +1063,7 @@
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
     $('#logoutBtn').addEventListener('click', async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; });
 
-    cargarEstado(); cargarConfig(); cargarFlujoEditor(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos(); cargarSoporte(); cargarClientes();
+    cargarEstado(); cargarConfig(); cargarIgnorados(); cargarConocimientoPanel(); cargarAgenda(); cargarCorreo(); cargarPagos(); cargarSoporte(); cargarClientes();
     setInterval(cargarEstado, 5000);
   </script>
 </body>

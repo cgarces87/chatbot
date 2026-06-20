@@ -901,32 +901,72 @@ async function manejarFlujo(chatId, entrada) {
 
   const n = flow.nodo(estado);
 
-  // Nodo de chat con IA: respuesta libre (con el contexto del nodo)
-  if (n.type === 'ai') {
+  if (n.type === 'ia') { // chat libre con IA (con el contexto del nodo)
     const reply = await askOpenAI(chatId, entrada, n.systemAddon || '');
     await sendWhatsApp(chatId, reply);
     console.log(`🤖 (IA/${estado}): ${reply}\n`);
     return;
   }
-
-  // Nodo de menú: emparejar la opción elegida
-  const opt = flow.matchOpcion(n, entrada);
-  if (!opt) {
-    await sendWhatsApp(chatId, '❓ No reconocí esa opción.\n\n' + flow.renderMenu(n));
+  if (n.type === 'menu') { // emparejar la opción elegida
+    const opt = flow.matchOpcion(n, entrada);
+    if (!opt) { await sendWhatsApp(chatId, '❓ No reconocí esa opción.\n\n' + flow.renderMenu(n)); return; }
+    await mostrarNodo(chatId, opt.next);
     return;
   }
-  await mostrarNodo(chatId, opt.next);
+  if (n.type === 'condicion') { // rama por palabras clave
+    const next = flow.matchCondicion(n, entrada);
+    if (!next) { await sendWhatsApp(chatId, n.message || 'No le entendí. ¿Podría reformularlo?'); return; }
+    await mostrarNodo(chatId, next);
+    return;
+  }
+  // fin u otro -> reiniciar
+  await mostrarNodo(chatId, f.start);
 }
 
-async function mostrarNodo(chatId, nodeId) {
+// Recorre el flujo: los nodos de "avance" (inicio/mensaje/acción) se procesan y
+// encadenan a su "next"; se detiene en los nodos que ESPERAN entrada (menu/condicion/ia/fin).
+async function mostrarNodo(chatId, nodeId, prof = 0) {
+  if (prof > 25) { console.warn('🧭 flujo: demasiados saltos seguidos (posible bucle), me detengo'); return; }
   const f = flow.obtener();
-  const valido = !!flow.nodo(nodeId);
-  const n = flow.nodo(nodeId) || flow.nodo(f.start);
-  await store.setFlowState(chatId, valido ? nodeId : f.start);
-  console.log(`🧭 ${chatId} -> nodo "${valido ? nodeId : f.start}"`);
+  let n = flow.nodo(nodeId);
+  if (!n) { nodeId = f.start; n = flow.nodo(nodeId); }
+  if (!n) return;
 
-  if (n.type === 'menu') await enviarMenu(chatId, n);
-  else if (n.message) await sendWhatsApp(chatId, n.message);
+  if (n.type === 'inicio') return mostrarNodo(chatId, n.next, prof + 1);
+  if (n.type === 'mensaje') {
+    if (n.message) await sendWhatsApp(chatId, n.message);
+    if (n.next) return mostrarNodo(chatId, n.next, prof + 1);
+    await store.setFlowState(chatId, f.start); return;
+  }
+  if (n.type === 'accion') {
+    try { await ejecutarAccionFlujo(chatId, n); } catch (e) { console.warn('🧭 flujo acción:', e.message); }
+    if (n.next) return mostrarNodo(chatId, n.next, prof + 1);
+    await store.setFlowState(chatId, f.start); return;
+  }
+
+  // Nodos que esperan entrada del usuario
+  await store.setFlowState(chatId, nodeId);
+  console.log(`🧭 ${chatId} -> nodo "${nodeId}" (${n.type})`);
+  if (n.type === 'menu') return enviarMenu(chatId, n);
+  if (n.message) await sendWhatsApp(chatId, n.message); // condicion / ia / fin con mensaje
+}
+
+// Ejecuta una acción simple de un nodo "accion"
+async function ejecutarAccionFlujo(chatId, n) {
+  if (n.message) await sendWhatsApp(chatId, n.message);
+  switch (n.accion) {
+    case 'qr':
+      if (runtime.enablePagos && qrDisponible()) await ejecutarHerramienta('enviar_qr_pago', {}, chatId, {});
+      break;
+    case 'asesor':
+      await sendWhatsApp(chatId, 'Le comparto el contacto de un asesor: 3014665399 (https://wa.me/573014665399).');
+      break;
+    case 'handoff':
+      activarHandoff(chatId);
+      console.log(`🙋 (flujo) atención humana activada en ${chatId}`);
+      break;
+    default: /* sin acción: el mensaje ya se envió */ break;
+  }
 }
 
 async function enviarMenu(chatId, n) {
