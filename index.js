@@ -370,6 +370,22 @@ const HERRAMIENTA_CLIENTE = {
   },
 };
 
+// Herramienta para enviar plantillas oficiales de POSFAC por WhatsApp
+const HERRAMIENTA_PLANTILLA = {
+  type: 'function',
+  function: {
+    name: 'enviar_plantilla',
+    description: 'Envía por WhatsApp una plantilla oficial de POSFAC. Usa "bienvenida" cuando un cliente quiere CONTRATAR/COMPRAR POSFAC (envía pasos de pago + documentación + el QR). Usa "activacion_mensual/trimestral/anual" SOLO cuando se confirme la activación de un plan ya pagado.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tipo: { type: 'string', enum: ['bienvenida', 'activacion_mensual', 'activacion_trimestral', 'activacion_anual'], description: 'Cuál plantilla enviar.' },
+      },
+      required: ['tipo'],
+    },
+  },
+};
+
 // Herramienta para consultar la disponibilidad real del calendario
 const HERRAMIENTA_DISPONIBILIDAD = {
   type: 'function',
@@ -536,7 +552,7 @@ async function qrParaEnvio() {
 
 // Devuelve las herramientas activas según lo configurado
 function herramientasActivas() {
-  const t = [HERRAMIENTA_CLIENTE];
+  const t = [HERRAMIENTA_CLIENTE, HERRAMIENTA_PLANTILLA];
   if (runtime.enableCalendar && calendar.disponible()) t.push(HERRAMIENTA_CAL, HERRAMIENTA_CANCELAR, HERRAMIENTA_DISPONIBILIDAD);
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
@@ -584,6 +600,30 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     await store.upsertCliente(chatId, { ...args, telefono: telefonoDe(chatId) });
     console.log(`🗂️  (chat) ${chatId} ficha de cliente actualizada`, args.nombre ? `(${args.nombre})` : '');
     return 'Ficha del cliente guardada. Continúa la conversación con normalidad.';
+  }
+  if (nombre === 'enviar_plantilla') {
+    const mapa = {
+      bienvenida: 'mensaje_bienvenida_posfac.txt',
+      activacion_mensual: 'activacion_mensual_posfac.txt',
+      activacion_trimestral: 'activacion_trimestral_posfac.txt',
+      activacion_anual: 'activacion_anual_posfac.txt',
+    };
+    const archivo = mapa[args.tipo];
+    if (!archivo) return 'Tipo de plantilla no válido.';
+    let texto;
+    try {
+      const r = await fetch('https://posfac.com/pago/' + archivo);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      texto = await r.text();
+    } catch (e) { return 'No pude obtener la plantilla en este momento (' + e.message + '). Intenta más tarde o comparte la información manualmente.'; }
+    await sendWhatsApp(chatId, texto);
+    // La bienvenida menciona el QR "adjunto": enviarlo también
+    if (args.tipo === 'bienvenida' && runtime.enablePagos && qrDisponible()) {
+      try { const qr = await qrParaEnvio(); await sendWhatsAppImage(chatId, { base64: qr.b64, mimetype: qr.mime, filename: 'qr-pago.jpg', caption: 'Código QR para pago (Bre-B).' }); }
+      catch (e) { console.warn('📄 QR de bienvenida:', e.message); }
+    }
+    console.log(`📄 (chat) ${chatId} recibió plantilla: ${args.tipo}`);
+    return `Plantilla "${args.tipo}" enviada al cliente por WhatsApp${args.tipo === 'bienvenida' ? ' (junto con el QR)' : ''}. Confírmalo brevemente y ofrécele ayuda con el pago o los documentos. NO repitas el contenido de la plantilla.`;
   }
   if (nombre === 'consultar_disponibilidad') {
     const fecha = String(args.fecha || '').slice(0, 10);
@@ -737,6 +777,7 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
     pagos += ` Para pago en línea con tarjeta o PSE (Wompi), comparte el enlace de Wompi que corresponda al PLAN del cliente y el total ya calculado, según la tabla de pagos de la base de conocimiento. Cada plan tiene su propio enlace: NUNCA uses el mismo para todos. NUNCA menciones IVA (POSFAC es software en la nube y no maneja IVA).`;
     sys += pagos;
   }
+  sys += `\n\nCONTRATACIÓN: cuando un cliente quiera CONTRATAR o COMPRAR POSFAC (ej. "quiero contratar", "cómo adquiero POSFAC", "quiero comprar el plan…"), llama la herramienta "enviar_plantilla" con tipo "bienvenida": envía los pasos de pago, la documentación y el QR. NO redactes tú esos pasos. Usa "activacion_mensual/trimestral/anual" SOLO cuando se confirme que un plan YA pagado quedó activado; NO la envíes solo porque el cliente diga que pagó.`;
   if (runtime.enableGlpi && glpi.disponible()) {
     sys += `\n\n=== SOPORTE (tickets GLPI) — REGLAS ESTRICTAS ===
 Para CUALQUIER gestión de soporte (crear o consultar tickets) sigue este orden, sin saltarte pasos:
