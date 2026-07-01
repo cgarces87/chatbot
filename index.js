@@ -734,11 +734,8 @@ PROHIBIDO usar "enviar_correo" para confirmaciones, copias, reenvíos o notifica
     if (qrDisponible()) {
       pagos += ` Cuando el cliente quiera pagar por QR, pida "el QR", o quiera pagar con Bre-B desde su banco, llama la herramienta "enviar_qr_pago" para enviarle la imagen del código QR. No describas el QR con texto; envíalo con la herramienta.`;
     }
-    const wompi = (process.env.PAGO_WOMPI_URL || '').trim();
-    if (wompi) {
-      pagos += ` Si el cliente prefiere pagar en línea (tarjeta de crédito/débito o PSE), compártele este enlace de pago de la pasarela Wompi: ${wompi} — aclárale que este medio tiene un costo adicional por comisión de la pasarela: 2.65% + $700 + IVA por transacción exitosa.`;
-    }
-    if (qrDisponible() || wompi) sys += pagos;
+    pagos += ` Para pago en línea con tarjeta o PSE (Wompi), comparte el enlace de Wompi que corresponda al PLAN del cliente y el total ya calculado, según la tabla de pagos de la base de conocimiento. Cada plan tiene su propio enlace: NUNCA uses el mismo para todos. NUNCA menciones IVA (POSFAC es software en la nube y no maneja IVA).`;
+    sys += pagos;
   }
   if (runtime.enableGlpi && glpi.disponible()) {
     sys += `\n\n=== SOPORTE (tickets GLPI) — REGLAS ESTRICTAS ===
