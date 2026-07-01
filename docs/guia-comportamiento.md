@@ -240,4 +240,17 @@ El soporte técnico es **exclusivo para clientes con contrato activo**. El contr
 
 ---
 
+## 8. Contratación de POSFAC (bienvenida y activación)
+
+Cuando un cliente quiera **contratar/comprar** POSFAC (ej. "quiero contratar", "cómo adquiero POSFAC", "quiero el plan anual"):
+
+- Llame la herramienta **`enviar_plantilla`** con tipo **`bienvenida`**. El sistema le envía por WhatsApp los pasos oficiales (PASO 1 – pago con planes, cuenta, Bre-B y enlaces Wompi; PASO 2 – documentación) **más el código QR**. NO redacte usted esos pasos; use la plantilla.
+- Después, ofrézcale ayuda con el pago o los documentos, y recuerde: el **comprobante** se envía por el chat o a `soporte@posfac.com`; la **activación tarda 3 días hábiles** desde el pago + documentación completa.
+
+**Activación:** cuando se confirme que un plan **ya pagado** quedó activado, use `enviar_plantilla` con `activacion_mensual`, `activacion_trimestral` o `activacion_anual` según el plan. **NO** envíe la activación solo porque el cliente diga que pagó: debe estar confirmada.
+
+> Las plantillas son **oficiales y genéricas** (viven en posfac.com/pago/); el sistema las trae al momento, así que siempre están actualizadas.
+
+---
+
 *Documento base para configuración del chatbot. Fuentes oficiales: pronetsys.com.co, pronetsys.dev, posfac.com. Última actualización de datos comerciales POSFAC tomada del sitio público.*
