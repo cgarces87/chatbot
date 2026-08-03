@@ -262,6 +262,23 @@ const contactos = new Map();
 const telefonos = new Map(); // chatId -> número de teléfono (si el webhook lo trae)
 const ticketEvidencia = new Map(); // chatId -> { entityId, titulo, descripcion, nombreCliente, emailCliente, evidencias:[] }
 
+// 🔁 Idempotencia: openwa (whatsapp-web.js) a veces entrega el MISMO mensaje
+// dos veces en milisegundos, y el bot terminaba respondiendo doble. Guardamos
+// una huella del mensaje por ~2 min y descartamos las entregas repetidas.
+const mensajesVistos = new Map(); // huella -> timestamp
+function mensajeDuplicado(huella, ventanaMs = 120000) {
+  if (!huella) return false; // sin datos para deduplicar: no arriesgamos a callar
+  const ahora = Date.now();
+  // Limpieza perezosa de huellas viejas
+  if (mensajesVistos.size > 500) {
+    for (const [k, t] of mensajesVistos) if (ahora - t > 120000) mensajesVistos.delete(k);
+  }
+  const prev = mensajesVistos.get(huella);
+  if (prev && ahora - prev < ventanaMs) return true; // ya lo atendimos hace poco
+  mensajesVistos.set(huella, ahora);
+  return false;
+}
+
 // Mejor número disponible para un chat: el del webhook, o el del chatId si es @c.us
 function telefonoDe(chatId) {
   if (!chatId) return '';
@@ -1048,17 +1065,28 @@ async function sendWhatsApp(chatId, text) {
   await mostrarEscribiendo(chatId, true); // "escribiendo…" mientras "piensa"
   await humanDelay();              // pausa humanizada antes de enviar
 
-  // Reintento: el openwa-api a veces da 500 en el primer envío a un contacto nuevo
-  let ultimoError = '';
-  for (let intento = 1; intento <= 2; intento++) {
-    const res = await fetch(waUrl('/messages/send-text'), {
+  // ⚠️ IMPORTANTE: openwa a veces responde 500 (y marca el mensaje como "failed")
+  // AUNQUE el mensaje SÍ se entregó a WhatsApp. Por eso NO reintentamos ante un
+  // error HTTP: reintentar duplicaba cada mensaje al cliente. Solo reintentamos si
+  // la petición ni siquiera llegó a openwa (fetch lanza => problema de red real).
+  let res;
+  try {
+    res = await fetch(waUrl('/messages/send-text'), {
       method: 'POST', headers: waHeaders, body: JSON.stringify({ chatId, text }),
     });
-    if (res.ok) return res.json();
-    ultimoError = `${res.status} ${(await res.text()).slice(0, 150)}`;
-    if (intento < 2) { console.warn(`↻ Reintentando envío a ${chatId} (falló: ${ultimoError})`); await new Promise((r) => setTimeout(r, 1500)); }
+  } catch (e) {
+    console.warn(`↻ Red falló al enviar a ${chatId} (${e.message}); reintento único…`);
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await fetch(waUrl('/messages/send-text'), {
+      method: 'POST', headers: waHeaders, body: JSON.stringify({ chatId, text }),
+    });
   }
-  throw new Error(`send-text fallo a ${chatId}: ${ultimoError}`);
+  if (res.ok) return res.json().catch(() => ({}));
+  // openwa devolvió error, pero lo más probable es que YA haya entregado el mensaje.
+  // NO reintentamos (evitar duplicados); solo lo dejamos registrado.
+  const detalle = `${res.status} ${(await res.text().catch(() => '')).slice(0, 150)}`;
+  console.warn(`⚠️  openwa respondió ${detalle} al enviar a ${chatId} (probablemente entregado; no reintento para no duplicar).`);
+  return { warned: detalle };
 }
 
 // Envía una imagen por WhatsApp (por URL o base64) con caption opcional
@@ -1072,16 +1100,24 @@ async function sendWhatsAppImage(chatId, { url, base64, mimetype, caption, filen
   if (mimetype) body.mimetype = mimetype;   // así openwa sabe que es JPG/PNG (no un .img genérico)
   if (filename) body.filename = filename;
 
-  let ultimoError = '';
-  for (let intento = 1; intento <= 2; intento++) {
-    const res = await fetch(waUrl('/messages/send-image'), {
+  // Igual que en el texto: openwa devuelve 500 aunque entregue. No reintentamos
+  // ante error HTTP (duplicaría la imagen); solo si la red falla de verdad.
+  let res;
+  try {
+    res = await fetch(waUrl('/messages/send-image'), {
       method: 'POST', headers: waHeaders, body: JSON.stringify(body),
     });
-    if (res.ok) return res.json();
-    ultimoError = `${res.status} ${(await res.text()).slice(0, 150)}`;
-    if (intento < 2) { console.warn(`↻ Reintentando imagen a ${chatId} (falló: ${ultimoError})`); await new Promise((r) => setTimeout(r, 1500)); }
+  } catch (e) {
+    console.warn(`↻ Red falló al enviar imagen a ${chatId} (${e.message}); reintento único…`);
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await fetch(waUrl('/messages/send-image'), {
+      method: 'POST', headers: waHeaders, body: JSON.stringify(body),
+    });
   }
-  throw new Error(`send-image fallo a ${chatId}: ${ultimoError}`);
+  if (res.ok) return res.json().catch(() => ({}));
+  const detalle = `${res.status} ${(await res.text().catch(() => '')).slice(0, 150)}`;
+  console.warn(`⚠️  openwa respondió ${detalle} al enviar imagen a ${chatId} (probablemente entregada; no reintento para no duplicar).`);
+  return { warned: detalle };
 }
 
 async function getSessionInfo() {
@@ -1195,6 +1231,18 @@ app.post('/webhook', async (req, res) => {
     const text = data.body ?? data.text ?? '';
     const type = data.type || 'text';
     const fromMe = data.fromMe === true;
+
+    // 🔁 Anti-duplicado: openwa a veces entrega el MISMO mensaje 2 veces.
+    // Si el payload trae un id de mensaje, deduplicamos por él (ventana 2 min).
+    // Si no, usamos una huella chatId+tipo+texto con ventana corta (8 s), suficiente
+    // para atrapar la doble entrega instantánea sin callar reenvíos legítimos.
+    const idMsg = data.id || data.messageId || data.msgId
+      || data.key?.id || data.message?.id || data.message?.key?.id || null;
+    const huella = idMsg ? `id:${idMsg}` : `c:${chatId}|${type}|${text}`;
+    if (mensajeDuplicado(huella, idMsg ? 120000 : 8000)) {
+      console.log(`🔁 Mensaje duplicado ignorado (${idMsg ? 'id ' + idMsg : 'huella corta'}) de ${chatId}`);
+      return;
+    }
 
     // Guardamos el nombre del contacto para mostrarlo en el panel
     const nombreContacto = data.contact?.name || data.contact?.pushName || data.pushName || '';
