@@ -25,6 +25,7 @@ const flow = require('./lib/flow');
 const calendar = require('./lib/calendar');
 const mailer = require('./lib/mailer');
 const glpi = require('./lib/glpi');
+const saldoOpenai = require('./lib/saldo-openai');
 
 // ---------------- Configuracion fija (.env) ----------------
 const {
@@ -1887,6 +1888,12 @@ let tunnelProc = null;
   console.log(`✉️  Correo SMTP: ${runtime.enableSmtp ? (mailer.disponible() ? 'ACTIVO' : 'activado pero sin host/usuario/clave') : 'desactivado'}`);
   console.log(`🎫 Soporte GLPI: ${runtime.enableGlpi ? (glpi.disponible() ? 'ACTIVO (tickets disponibles)' : 'activado pero sin URL/tokens') : 'desactivado'}`);
   console.log(`🔧 Herramientas del bot activas: ${herramientasActivas().map((t) => t.function.name).join(', ') || 'NINGUNA'}`);
+
+  // Monitor de saldo de OpenAI (alertas por correo + WhatsApp cuando queda poco/se agota)
+  if ((process.env.ENABLE_MONITOR_SALDO ?? 'false') === 'true') {
+    saldoOpenai.configurar({}, {});
+    saldoOpenai.iniciar({ enviarCorreo: mailer.enviar, correoDisponible: mailer.disponible, enviarWhatsApp: sendWhatsApp });
+  }
 
   app.listen(port, async () => {
     console.log(`\n✅ Servidor local escuchando en http://localhost:${port}`);
