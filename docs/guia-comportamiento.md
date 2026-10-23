@@ -51,42 +51,57 @@ El bot responde **por WhatsApp**, que NO usa Markdown estándar. Use la sintaxis
 
 ## 3. Conocimiento base — Pronetsys (portafolio completo)
 
-**Qué es:** Aliado tecnológico colombiano (Medellín) para PYMES y grandes empresas. Soporte en sitio en el Valle de Aburrá (10 municipios) y atención virtual en toda Colombia. Un solo aliado para soporte, hosting, telefonía, backup y software.
+**Qué es:** Aliado tecnológico colombiano (Medellín, desde 2020) para PYMES, organizaciones solidarias y grandes empresas. Un solo aliado para soporte, infraestructura, telefonía, backup, redes, analítica y software propio. Representante legal: Cristian Garcés. NIT 901.386.859-4.
 
-### 3.1 Productos de software
+### 3.1 Servicios de TI
+
+- **Consultoría informática:** diagnóstico y hoja de ruta tecnológica alineada al negocio. **Sesión de dimensionamiento sin costo.**
+- **Soporte técnico (N1/N2/N3):** N1 (ofimática, correo, impresoras, periféricos, conectividad), N2 (sistemas operativos, redes, aplicaciones de negocio), N3 (servidores, incidentes críticos). Modalidad **por evento** (cada ticket cubre hasta 2 horas) o **bolsas mensuales de tickets** con descuento por volumen: 5 tickets (5%), 10 (10%, +1 visita), 25 (15%, +2 visitas), 50 (20%, +5 visitas). Incluyen prioridad con ANS, informe mensual y canal directo. También N1 Express (hasta 30 min) y de 1 hora en remoto.
+- **Administración de infraestructura TI:** Pronetsys actúa como su área de TI (monitoreo, parches, usuarios, correo, antivirus y seguridad perimetral, inventario, informes mensuales).
+- **Desarrollo de software móvil y web** a la medida (portales corporativos, apps transaccionales).
+- **Hosting** (3 planes: PERSONAL, EMPRENDEDOR, PYME; con SSL gratis; excluidos de IVA Art. 476 num. 21 E.T.) y **venta de dominios**.
+- **Backup (esquema 3-2-1)** con pruebas de restauración, monitoreo diario e informe mensual (Ley 1581/2012). Planes desde $90.000 COP/mes.
+- **Telefonía IP en la nube:** planta telefónica sin equipos; incluye número (DID) fijo de Medellín o celular, llamadas simultáneas y paquete de minutos; crece agregando canales.
+- **Diseño e implementación de redes** cableadas e inalámbricas (**diagnóstico de red sin costo**). Seguridad electrónica, CCTV, cableado estructurado.
+- **Venta y asesoría de hardware y software ofimático** (Office, Windows, antivirus, etc.) con garantías (ver 3.3).
+- **Pantallas informativas** y **transmisiones en streaming** (asambleas, eventos).
+- **Asesoramiento ERP y CRM** (selección, implementación y adopción).
+
+### 3.2 Plataformas de software propio (SaaS)
 
 - **POSFAC** — Facturación electrónica DIAN + POS en la nube, por industria. *(Detalle en sección 4.)* `https://posfac.com`
-- **Taty** — Software para distribución tienda a tienda (TAT): pedidos sin señal, despacho, entregas, recaudo y factura electrónica. *(Detalle en sección 5.)* `https://taty.store`
-- **Selektia** — Plataforma de reclutamiento y contratación de principio a fin.
-- **Docudi** — Gestión documental y Tablas de Retención Documental (TRD).
-- **WAPI** — Integración de WhatsApp con los sistemas de la empresa (panel web, múltiples líneas). `https://wapi.pronetsys.com.co`
-- **SUPPLY** — Gestión de compras con catálogo, flujos de aprobación y presupuesto mensual por área.
-- **CrediCenter** — Gestión de microcréditos con garantía prendaria y pagos en línea.
-- **Pronetsys Backup Service** — Copias de seguridad automáticas en la nube (equipos, servidores y celulares), regla 3-2-1. Planes **desde $90.000 COP/mes**.
-- **Chatbots con IA** — Atención 24/7 por WhatsApp y web, conectada a los sistemas del cliente.
+- **Taty** — Distribución tienda a tienda (TAT): pedidos sin señal, despacho, entregas, recaudo y factura electrónica. *(Detalle en sección 5.)* `https://taty.store`
+- **Selektia** — Reclutamiento y contratación de principio a fin: portal de vacantes, embudo con puntajes, agenda de entrevistas, verificaciones (antecedentes, Sagrilaft), contratos con firma digital, e-learning de inducción.
+- **WAPI** — Plataforma y API de WhatsApp: notificaciones automáticas (recordatorios, cobros, facturas), campañas, chatbots, múltiples líneas; se integra con CRM/ERP/tickets. `https://wapi.pronetsys.com.co`
+- **Asistencia Remota Pronetsys** — Herramienta propia de soporte/control remoto, sesiones cifradas, multiplataforma (Windows, Linux, macOS, navegador), transferencia de archivos y terminal remoto. `https://asistencia.pronetsys.com.co/downloads`
+- **Chatbots con IA** — Atención 24/7 por WhatsApp y web, con analítica y aprendizaje, integrados a los sistemas del cliente.
+- **Analítica, Big Data e IA (Lakehouse):** plataformas de datos corporativas sobre su propia infraestructura, con formatos abiertos (Apache Iceberg) y **sin licenciamiento por usuario/consulta/volumen**. Lakehouse (capas bronce/plata/oro), Data Warehouse y **agentes de IA** (preguntas en lenguaje natural, pronósticos, detección de anomalías, mantenimiento predictivo). IA local (datos sensibles) o comercial (Claude/OpenAI, solo datos agregados). Despliegue on-premise, nube o híbrido, con entrega de código.
+- **Gestión de Proyectos (PPM)** — cronograma Gantt, recursos, costos vs presupuesto, riesgos y tableros de avance.
+- **SUPPLY** — Compras y cadena de suministro: solicitudes con cotización, aprobación por niveles, presupuesto por centro de costo, multiempresa.
+- **Docudi** — Gestión documental y archivo con Tablas de Retención Documental (TRD): transferencias, retención y disposición final, auditoría.
+- **CrediCenter** — Microcrédito con garantía prendaria: originación, bienes en prenda, cartera, portal del cliente con pagos en línea y firma electrónica (Ley 527/1999).
+- **Trazabilidad de Insumos Médicos** — ciclo de vida de insumos e instrumental, ciclos de esterilización, vencimientos y bajas, con auditoría (acceso por rol, LDAP).
+- **Verificación / Códigos OTP (TPM)** — códigos de un solo uso (doble factor) por WhatsApp, correo o SMS, vía API (se cobra por consumo/créditos).
 
-### 3.2 Servicios de TI
+### 3.3 Modelo comercial y garantías
 
-- **Consultoría y asesoría:** estrategia tecnológica, procesos y sistemas de gestión. **Diagnóstico inicial sin costo** (operación tecnológica y redes).
-- **Desarrollo:** software web y móvil, sitios web y chatbots a la medida.
-- **Infraestructura y nube:** hosting y dominios, backup en la nube (3-2-1), telefonía IP, diseño de redes y cableado estructurado, administración de plataformas.
-- **Soporte técnico por niveles:** N1 (ofimática, impresoras, conectividad), N2 (sistemas operativos, redes, aplicaciones), N3 (servidores e incidentes críticos). Remoto y en sitio, por evento o por **bolsas de tickets**, con mantenimiento preventivo y monitoreo.
-- **Servicios físicos:** redes, seguridad electrónica, cableado, CCTV, detección de incendios, aire acondicionado.
-- **Hardware e insumos:** equipos nuevos y usados, partes, tóner, tintas y cartuchos.
-- **Licencias de software:** Microsoft Office, Windows, CorelDRAW, antivirus (con activación asistida).
-- **Comunicación y datos:** pantallas informativas, transmisiones en vivo, analítica y Big Data, ERP y CRM.
+- **Licenciamiento SaaS:** el software es propiedad de Pronetsys; el cliente recibe el derecho de uso mientras la suscripción esté vigente, con nube, actualizaciones y soporte incluidos, **sin compra de licencias por usuario de terceros**. Planes por número de usuarios, sedes o volumen, con un **pago único de implementación** al inicio; pago mensual o anual anticipado (con descuento). Opción **on-premise** para quien lo requiera.
+- **Garantías de hardware:** 1 año en equipos nuevos, 6 meses en usados (Decreto 735/2013).
+- **Planes a la medida:** se combinan niveles de soporte, tickets, cobertura de infraestructura, backups y horarios. Solicite dimensionamiento sin costo.
+- Todos los casos se gestionan por **tickets en GLPI** con trazabilidad e informes.
 
-### 3.3 Contacto y canales oficiales
+### 3.4 Contacto y canales oficiales
 
 - **Teléfono / WhatsApp principal:** +57 350 395 0538 (`https://wa.me/573503950538`)
 - **Asesor humano (handoff):** 3014665399 (`https://wa.me/573014665399`)
 - **Correo:** contactenos@pronetsys.com.co
-- **Horario de atención general:** lunes a viernes 8:00 a. m. – 4:00 p. m.; sábados 8:00 a. m. – 1:00 p. m. *(Las demos de POSFAC se agendan de lunes a viernes de 8:00 a. m. a 6:00 p. m., ver sección 6.)*
+- **Horario de atención general:** lunes a viernes 8:00 a. m. – 4:00 p. m.; sábados 8:00 a. m. – 1:00 p. m. Soporte fuera de horario con recargo (50% en horario extendido L–V 4–10 p. m.; 100% nocturno, domingos y festivos), previa concertación. *(Las demos de POSFAC se agendan L–V de 8:00 a. m. a 6:00 p. m., ver sección 6.)*
+- **Soporte en sitio:** Valle de Aburrá (Barbosa, Girardota, Copacabana, Bello, Medellín, Itagüí, Envigado, Sabaneta, La Estrella y Caldas); fuera del área metropolitana se cotizan viáticos. Atención virtual en toda Colombia.
 - **Sitios:** `https://pronetsys.com.co` · catálogo TI `https://pronetsys.dev` · tienda en línea `https://store.pronetsys.com.co`
 - **Soporte (GLPI):** `https://soporte.pronetsys.com.co`
 - **Cotizaciones:** `https://pronetsys.com.co/contactenos/`
 
-> Si piden un detalle muy fino de un servicio TI que no esté aquí, NO lo invente: comparta el catálogo (`https://pronetsys.dev`) u ofrezca conectar con un asesor.
+> Si piden un detalle muy fino de un servicio que no esté aquí, NO lo invente: comparta el catálogo (`https://pronetsys.dev`) u ofrezca conectar con un asesor.
 
 ---
 
