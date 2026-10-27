@@ -596,6 +596,10 @@ function herramientasActivas() {
 async function crearTicketDesdeFlujo(chatId) {
   const flujo = ticketEvidencia.get(chatId);
   if (!flujo) return { ok: false, motivo: 'No hay un caso en preparación. Recopila los datos y llama "preparar_ticket" primero.' };
+  if (flujo.entityId == null || flujo.entityId === '' || Number(flujo.entityId) === 0) {
+    // Sin una entidad/sede válida el caso quedaría en la raíz y no se asociaría al NIT.
+    return { ok: false, motivo: 'Falta identificar la sede/entidad del cliente. Pídele el NIT, llama "buscar_entidad", elige la sede y vuelve a preparar el caso con ese entityId.' };
+  }
   const tel = telefonoDe(chatId);
   const contenido = `${flujo.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
     + `Nombre: ${flujo.nombreCliente || '(no proporcionado)'}\n`
