@@ -262,6 +262,18 @@ const handoff = new Map();
 const contactos = new Map();
 const telefonos = new Map(); // chatId -> número de teléfono (si el webhook lo trae)
 const ticketEvidencia = new Map(); // chatId -> { entityId, titulo, descripcion, nombreCliente, emailCliente, evidencias:[] }
+// Entidades (sedes) validadas por NIT vía buscar_entidad en ESTA conversación.
+// Candado: consultar_ticket/listar_casos_abiertos SOLO operan sobre entityId aquí presentes.
+const entidadesValidadas = new Map(); // chatId -> Set<entityId>
+function registrarEntidadesValidadas(chatId, ids) {
+  let set = entidadesValidadas.get(chatId);
+  if (!set) { set = new Set(); entidadesValidadas.set(chatId, set); }
+  for (const id of ids) set.add(Number(id));
+}
+function entidadValidada(chatId, entityId) {
+  const set = entidadesValidadas.get(chatId);
+  return !!set && set.has(Number(entityId));
+}
 
 // 🔁 Idempotencia: openwa (whatsapp-web.js) a veces entrega el MISMO mensaje
 // dos veces en milisegundos, y el bot terminaba respondiendo doble. Guardamos
@@ -713,6 +725,8 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
       return `El NIT ${args.nit} NO está registrado = no tiene contrato activo. NO crees ticket. Explícale con cortesía que el soporte técnico es solo para clientes con contrato activo y dale el WhatsApp del asesor: 3014665399 (https://wa.me/573014665399). Permítele verificar el NIT por si lo escribió mal. NO reveles otras empresas.`;
     }
     console.log(`🎫 (chat) ${chatId} entidad: ${cli.nombre} (${cli.ubicaciones.length} sede/s)`);
+    // Candado: a partir de aquí el chat SÍ puede consultar tickets de estas sedes.
+    registrarEntidadesValidadas(chatId, cli.ubicaciones.map((u) => u.id));
     const sedes = cli.ubicaciones.map((u, i) => `  ${i + 1}. ${u.nombre}${u.direccion ? ' — ' + u.direccion : ''} [entityId=${u.id}]`).join('\n');
     return `Empresa encontrada: "${cli.nombre}".\nSedes/direcciones disponibles:\n${sedes}\n\n`
       + (cli.ubicaciones.length > 1
@@ -739,12 +753,20 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     return 'El caso se creó y la confirmación ya se le envió al cliente. No escribas nada más.';
   }
   if (nombre === 'consultar_ticket') {
+    if (!entidadValidada(chatId, args.entityId)) {
+      console.log(`🎫 (chat) ${chatId} bloqueó consultar_ticket: entidad no validada por NIT en esta conversación`);
+      return 'ANTES de consultar cualquier caso DEBES identificar la empresa: pídele al cliente el NIT de la empresa desde donde contacta y llama "buscar_entidad" con ese NIT. NO consultes ni des información de tickets hasta validar el NIT en esta conversación.';
+    }
     const t = await glpi.estadoTicket(args.numero, args.entityId);
     if (!t) return `No se encontró el ticket #${args.numero} para esta empresa. Verifica el número con el cliente (no reveles información de otras entidades).`;
     console.log(`🎫 (chat) ${chatId} consultó ticket #${t.id} -> ${t.estado}`);
     return `Ticket #${t.id} "${t.titulo}": estado actual *${t.estado}*. Infórmaselo al cliente.`;
   }
   if (nombre === 'listar_casos_abiertos') {
+    if (!entidadValidada(chatId, args.entityId)) {
+      console.log(`🎫 (chat) ${chatId} bloqueó listar_casos_abiertos: entidad no validada por NIT en esta conversación`);
+      return 'ANTES de listar casos DEBES identificar la empresa: pídele al cliente el NIT de la empresa desde donde contacta y llama "buscar_entidad" con ese NIT. NO listes ni des información de tickets hasta validar el NIT en esta conversación.';
+    }
     const lista = await glpi.listarTicketsAbiertos(args.entityId);
     if (!lista.length) return 'La empresa no tiene casos abiertos actualmente. Infórmaselo al cliente.';
     // Traer el último comentario de cada uno (en paralelo)
@@ -820,7 +842,7 @@ Para CUALQUIER gestión de soporte (crear o consultar tickets) sigue este orden,
 
 3a) CREAR CASO: si reporta una falla, pídele —una pregunta a la vez— su NOMBRE, su CORREO y la DESCRIPCIÓN del problema. APENAS tengas los tres (y la sede), llama "preparar_ticket" con el entityId de la sede. Después, pídele al cliente que envíe la EVIDENCIA del problema (foto/captura, PDF o video) por este chat si la tiene, o que escriba "listo" si no tiene. Los archivos que envíe quedan adjuntos automáticamente. Cuando el cliente diga que terminó o que no tiene evidencia, llama "finalizar_ticket": el sistema crea el caso con los adjuntos y te da las instrucciones para cerrar (número de caso + atención remota + resumen). NUNCA ejecutes la conexión remota; solo informas.
 
-3b) CONSULTAR ESTADO:
+3b) CONSULTAR ESTADO: para consultar o listar casos SIEMPRE debes identificar primero la empresa. Aunque el cliente te dé un número de caso o pida "mis casos", tu PRIMERA acción es pedirle el NIT de la empresa desde donde contacta y llamar "buscar_entidad". PROHIBIDO dar cualquier información de tickets sin haber validado el NIT en esta conversación (el sistema además lo bloquea).
    - Si sabe el número del caso: llama "consultar_ticket" con el número y el entityId de su empresa.
    - Si NO sabe el número: llama "listar_casos_abiertos" con el entityId y muéstrale sus casos abiertos con el último comentario.
 
