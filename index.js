@@ -578,6 +578,38 @@ function herramientasActivas() {
   return t;
 }
 
+// Crea el caso en GLPI a partir del flujo en preparación (modo evidencia) y arma
+// el mensaje para el cliente. Reutilizable: lo usa finalizar_ticket (si el modelo
+// lo llama) y el webhook (cuando el cliente escribe "listo"), sin depender del modelo.
+async function crearTicketDesdeFlujo(chatId) {
+  const flujo = ticketEvidencia.get(chatId);
+  if (!flujo) return { ok: false, motivo: 'No hay un caso en preparación. Recopila los datos y llama "preparar_ticket" primero.' };
+  const tel = telefonoDe(chatId);
+  const contenido = `${flujo.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
+    + `Nombre: ${flujo.nombreCliente || '(no proporcionado)'}\n`
+    + `Correo: ${flujo.emailCliente || '(no proporcionado)'}\n`
+    + `WhatsApp: ${tel ? '+' + tel : chatId}`;
+  const t = await glpi.crearTicket({ titulo: flujo.titulo, descripcion: contenido, entityId: flujo.entityId });
+  let adjuntados = 0;
+  for (const ev of flujo.evidencias) {
+    try { await glpi.adjuntarDocumento(t.id, ev); adjuntados++; }
+    catch (e) { console.warn('📎 No se pudo adjuntar evidencia:', e.message); }
+  }
+  ticketEvidencia.delete(chatId); // solo se borra el estado si el caso se creó bien
+  console.log(`🎫 (chat) ${chatId} creó ticket #${t.id} en entidad ${flujo.entityId} con ${adjuntados}/${flujo.evidencias.length} adjunto(s)`);
+  try {
+    await store.upsertCliente(chatId, {
+      nombre: flujo.nombreCliente, email: flujo.emailCliente, telefono: tel,
+      resumen: `Creó ticket de soporte #${t.id}: ${flujo.titulo}`,
+    });
+  } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha tras crear ticket:', e.message); }
+  const mensajeCliente = `✅ Su caso de soporte quedó registrado con el número *#${t.id}*.`
+    + (adjuntados ? ` Se adjuntaron ${adjuntados} evidencia(s).` : '')
+    + `\n\nSalvo que sea un daño físico que no se pueda resolver de forma remota, la atención es *remota*: por favor descargue la app de asistencia aquí: https://asistencia.pronetsys.com.co/downloads`
+    + `\n\nUn técnico lo contactará pronto para validar la novedad. Resumen: caso *#${t.id}* — "${flujo.titulo}". Quedamos atentos.`;
+  return { ok: true, id: t.id, adjuntados, mensajeCliente, titulo: flujo.titulo };
+}
+
 // Ejecuta una herramienta pedida por el modelo y devuelve el resultado (texto).
 // ctx.respuestaDirecta: si se define, ese texto se envía al cliente TAL CUAL (sin que el modelo lo reescriba).
 async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
@@ -689,42 +721,22 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
       + ' SOLO puedes trabajar con esta empresa; nunca menciones ni uses datos de otras entidades.';
   }
   if (nombre === 'preparar_ticket') {
+    const prev = ticketEvidencia.get(chatId);
     ticketEvidencia.set(chatId, {
       entityId: args.entityId, titulo: args.titulo, descripcion: args.descripcion,
-      nombreCliente: args.nombreCliente, emailCliente: args.emailCliente, evidencias: [],
+      nombreCliente: args.nombreCliente, emailCliente: args.emailCliente,
+      // Conserva la evidencia ya recibida si se vuelve a preparar (no la borra)
+      evidencias: prev && Array.isArray(prev.evidencias) ? prev.evidencias : [],
     });
     console.log(`🎫 (chat) ${chatId} preparó el caso (esperando evidencia)`);
-    return 'Datos del caso guardados. AHORA dile al cliente que, si tiene evidencia del problema (una foto/captura, PDF o video), la envíe por este chat; y que cuando termine, o si no tiene, escriba "listo". Cuando el cliente lo indique, llama "finalizar_ticket". NO crees el caso aún.';
+    return 'Datos del caso guardados. AHORA dile al cliente que, si tiene evidencia del problema (foto/captura, PDF o video), la envíe por este chat; y que cuando termine, o si no tiene, escriba "listo". El SISTEMA crea el caso automáticamente cuando el cliente escriba "listo": NO vuelvas a llamar preparar_ticket, buscar_entidad ni ninguna otra herramienta; solo transmite ese mensaje y espera. NO crees el caso aún.';
   }
   if (nombre === 'finalizar_ticket') {
-    const flujo = ticketEvidencia.get(chatId);
-    if (!flujo) return 'No hay un caso en preparación. Recopila los datos y llama "preparar_ticket" primero.';
-    // Aviso inmediato: crear el caso + subir adjuntos tarda unos segundos
-    try { await sendWhatsApp(chatId, 'Perfecto. En un momento le envío el número de su caso registrado.'); } catch { /* no bloquea la creación */ }
-    const tel = telefonoDe(chatId);
-    const contenido = `${flujo.descripcion || ''}\n\n--- Datos de contacto (vía WhatsApp) ---\n`
-      + `Nombre: ${flujo.nombreCliente || '(no proporcionado)'}\n`
-      + `Correo: ${flujo.emailCliente || '(no proporcionado)'}\n`
-      + `WhatsApp: ${tel ? '+' + tel : chatId}`;
-    const t = await glpi.crearTicket({ titulo: flujo.titulo, descripcion: contenido, entityId: flujo.entityId });
-    let adjuntados = 0;
-    for (const ev of flujo.evidencias) {
-      try { await glpi.adjuntarDocumento(t.id, ev); adjuntados++; }
-      catch (e) { console.warn('📎 No se pudo adjuntar evidencia:', e.message); }
-    }
-    ticketEvidencia.delete(chatId);
-    console.log(`🎫 (chat) ${chatId} creó ticket #${t.id} en entidad ${flujo.entityId} con ${adjuntados}/${flujo.evidencias.length} adjunto(s)`);
-    try {
-      await store.upsertCliente(chatId, {
-        nombre: flujo.nombreCliente, email: flujo.emailCliente, telefono: tel,
-        resumen: `Creó ticket de soporte #${t.id}: ${flujo.titulo}`,
-      });
-    } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha tras crear ticket:', e.message); }
-    return `Caso creado con el número *#${t.id}*${adjuntados ? ` (${adjuntados} evidencia(s) adjunta(s))` : ''}.\n`
-      + `Comunícale al cliente, en este orden:\n`
-      + `1) El número de su caso: #${t.id}.\n`
-      + `2) Salvo daño físico no resoluble remotamente, la atención es REMOTA: comparte el enlace https://asistencia.pronetsys.com.co/downloads para descargar la app de asistencia remota, y avísale que un técnico lo contactará pronto para validar la novedad.\n`
-      + `3) Un RESUMEN breve de la atención: empresa, problema reportado y número de caso.`;
+    try { await sendWhatsApp(chatId, 'Perfecto. En un momento le confirmo el número de su caso.'); } catch { /* no bloquea */ }
+    const r = await crearTicketDesdeFlujo(chatId);
+    if (!r.ok) return r.motivo;
+    ctx.respuestaDirecta = r.mensajeCliente; // se envía tal cual al cliente
+    return 'El caso se creó y la confirmación ya se le envió al cliente. No escribas nada más.';
   }
   if (nombre === 'consultar_ticket') {
     const t = await glpi.estadoTicket(args.numero, args.entityId);
@@ -1347,6 +1359,31 @@ app.post('/webhook', async (req, res) => {
     if (!text.trim()) return;
 
     console.log(`📩 ${chatId}: ${text}`);
+
+    // 🎫 MODO EVIDENCIA: si hay un caso en preparación y el cliente indica que terminó
+    // ("listo", "ya", "termine", "no tengo", etc.), creamos el caso AQUÍ, de forma
+    // determinística, sin pasar por el modelo (que a veces re-llama preparar_ticket en
+    // bucle y nunca finaliza). Es el mismo criterio con que buffeamos la evidencia.
+    if (ticketEvidencia.has(chatId)) {
+      const limpio = text.trim().toLowerCase().replace(/[.!¡¿?,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const esFinalizar = /^(listo|lista|ok listo|ok ya|ya|ya esta|ya termine|ya termino|ya quedo|termine|termino|terminado|terminada|eso es todo|eso es|eso seria todo|no tengo|no tengo mas|no tengo evidencia|ninguna|nada|no|finalizar|finaliza|crear caso|crea el caso|crear el caso|crea el ticket|crear ticket|ok termine|listo gracias|gracias listo|ya quedo listo|ya esta listo)$/.test(limpio)
+        || (limpio.length <= 30 && /\b(listo|termin\w+|finaliz\w+)\b/.test(limpio));
+      if (esFinalizar) {
+        console.log(`🎫 ${chatId}: "${text.trim()}" → finalizando el caso directamente (modo evidencia)`);
+        try {
+          await sendWhatsApp(chatId, 'Perfecto. En un momento le confirmo el número de su caso.');
+          const r = await crearTicketDesdeFlujo(chatId);
+          await sendWhatsApp(chatId, r.ok ? r.mensajeCliente : (r.motivo || 'No encontré un caso en preparación. Por favor empecemos de nuevo.'));
+        } catch (e) {
+          console.error('🎫 Error creando el caso (modo evidencia):', e.message);
+          // No se borró el estado (la excepción fue antes); el cliente puede reintentar "listo"
+          await sendWhatsApp(chatId, 'Tuve un inconveniente creando el caso (el sistema de soporte no respondió). Por favor escriba *listo* de nuevo en un momento, o comuníquese con el asesor: 3014665399 (https://wa.me/573014665399).');
+        }
+        state.messagesHandled++;
+        return;
+      }
+    }
+
     if (runtime.enableFlow) {
       // Modo flujo: menús + IA según el nodo en que esté el usuario
       await manejarFlujo(chatId, text.trim());
