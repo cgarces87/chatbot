@@ -857,6 +857,10 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
         if (car.length) lineas.push(`Características:\n${car.join('\n')}`);
       }
       if (d.incluye) lineas.push(`Incluye: ${d.incluye}`);
+      if (Array.isArray(d.opciones) && d.opciones.length) {
+        const ops = d.opciones.map((o) => `  • ${o.nombre || ''}: ${o.precio || ''}`.trimEnd());
+        lineas.push(`Opciones/upgrades disponibles:\n${ops.join('\n')}`);
+      }
       if (d.garantia) lineas.push(`Garantía: ${d.garantia}`);
       if (d.envio) lineas.push(`Envío: ${d.envio}`);
       lineas.push(`Enlace: ${d.url || args.url}`);
@@ -944,7 +948,7 @@ Pronetsys tiene una tienda en línea de productos físicos y licencias (portáti
 - Si no encuentras el producto o no obtienes el detalle, dilo con claridad y comparte el enlace de la tienda; ofrece conectar con un asesor. NO supongas ni completes datos de tu conocimiento general.
 - PRECIOS: repite el precio TAL CUAL lo entrega la tienda, incluida su nota ("IVA incluido" o "Excluido de IVA") si la trae. NO calcules, agregues ni quites IVA tú.
 - ENVÍOS: desde Medellín a toda Colombia; el envío NO está incluido en el precio y se paga contra entrega a la transportadora. El software/licencias se entrega por correo tras confirmar el pago. Más detalle: ${tienda.conf.url}/politicas/envios.
-- GARANTÍA: los productos nuevos tienen garantía del fabricante y la tienda gestiona el proceso vía garantias@pronetsys.com.co.
+- GARANTÍA (si el producto trae su propio texto de garantía en el detalle, usa ESE; esta es la política general): Nuevos → garantía del *fabricante*, se tramita en el centro de servicio autorizado de la marca; si llega con defecto de fábrica, hay cambio por la misma referencia dentro de 7 días hábiles. NO digas que la tienda gestiona la garantía de los productos nuevos. Reacondicionados → 6 meses con Pronetsys. Licencias → soporte de activación.
 - COMPRA: el pago es anticipado por transferencia; para comprar, comparte el enlace del producto y, si hace falta, conéctalo con un asesor.`;
   }
 

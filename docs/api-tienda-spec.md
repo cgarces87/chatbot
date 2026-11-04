@@ -61,8 +61,9 @@ Los nombres de campo están alineados con lo que la tienda ya maneja por product
   // … o como objeto { "Conexión": "Inalámbrico 2.4 GHz", "Alcance": "10 m" }. El bot acepta ambas formas.
 
   "incluye": "Mouse, receptor USB nano, 1 pila AA",   // opcional (lo que trae la caja)
-  "garantia": "Garantía del fabricante; la tienda gestiona el proceso vía garantias@pronetsys.com.co", // opcional
+  "garantia": "Garantía del fabricante; se tramita en el centro de servicio autorizado de la marca…", // opcional, TEXTO según política (ver abajo)
   "envio": "Desde Medellín a toda Colombia; no incluido en el precio, se paga contra entrega.", // opcional, texto
+  "opciones": [ { "nombre": "Monitor de 22\" en lugar de 19\"", "precio": "+$178.500" } ], // opcional (upgrades, p.ej. escritorios reacondicionados)
   "imagenes": [ "https://store.pronetsys.com.co/media/p/...-1200.webp" ] // opcional (no se usa en WhatsApp por ahora)
 }
 ```
@@ -73,7 +74,13 @@ Los nombres de campo están alineados con lo que la tienda ya maneja por product
 - **`iva`**: el **texto literal** que muestra la ficha (`"IVA incluido"` o `"Excluido de IVA (Art. 424 E.T.)"`). Es clave para que el bot no asuma el régimen tributario.
 - **`caracteristicas`** puede ser **arreglo** de strings `"Etiqueta: valor"` (lo que ya tienen) **o** un objeto `{clave: valor}`; el bot soporta las dos.
 - **`descripcion` / `caracteristicas` en texto plano**, sin etiquetas HTML.
-- **`disponibilidad`** y **`estado`** como texto; no hace falta exponer inventario exacto. Si `estado` ≠ `"publicado"`, el bot avisa que no está disponible y no lo ofrece.
+- **`disponibilidad`** y **`estado`** como texto; no hace falta exponer inventario exacto. Si `estado` = `"descontinuado"`, `disponibilidad` = `"Ya no disponible"` y el bot no lo ofrece. Si está publicado: `"Disponible"` / `"Agotado"` / `"Bajo pedido"`.
+- **`sku`** = la **referencia** del producto, no la clave interna.
+- **`garantia`** (texto según la política vigente; el bot repite lo que llegue en este campo):
+  - **Nuevos:** garantía del fabricante, se tramita en el centro de servicio autorizado de la marca; si llega con defecto de fábrica, cambio por la misma referencia dentro de 7 días hábiles. (La tienda **no** gestiona la garantía de los nuevos.)
+  - **Reacondicionados:** 6 meses con Pronetsys.
+  - **Licencias:** soporte de activación.
+- Un **slug viejo renombrado** redirige a la ficha vigente y devuelve la `url` nueva en el campo `url`. Un slug inexistente → `404 {"error":"no encontrado"}`.
 
 ### Ejemplo de llamada
 
