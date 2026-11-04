@@ -3,14 +3,14 @@
 **Para:** equipo de desarrollo de `store.pronetsys.com.co`
 **Objetivo:** que el chatbot de WhatsApp pueda leer las características de un producto directamente de la tienda (sin scrapear HTML y sin inventar datos).
 
-El bot ya consume el buscador que ustedes tienen:
+El bot ya consume el buscador existente:
 
 ```
 GET /api/buscar?q=<término>
 → { "total": 123, "items": [ { "nombre": "...", "url": "...", "precio": "$4.760", "img": "..." }, ... ] }
 ```
 
-Falta **un solo endpoint nuevo**: el detalle de un producto en JSON. Es el mismo dato que ya renderiza la página `/producto/{slug}`, pero servido como JSON.
+Falta **un solo endpoint nuevo**: el detalle de un producto en JSON (el mismo dato que ya renderiza la ficha `/producto/{slug}`, pero servido como JSON).
 
 ---
 
@@ -20,64 +20,79 @@ Falta **un solo endpoint nuevo**: el detalle de un producto en JSON. Es el mismo
 GET /api/producto/{slug}
 ```
 
-- `{slug}` es el identificador que ya aparece en `url` del buscador: en
+- **Método:** `GET`. **Slug:** el identificador que ya aparece en el campo `url` del buscador. En
   `https://store.pronetsys.com.co/producto/mouse-logitech-inalambrico-m170-blanco`
   el slug es `mouse-logitech-inalambrico-m170-blanco`.
-- **Respuesta:** `200 OK` con `Content-Type: application/json; charset=utf-8`.
-- **Si el producto no existe:** `404` (el bot lo maneja y comparte el enlace).
-- **Sin autenticación** (igual que `/api/buscar`). Es solo lectura.
-- Idealmente permitirlo en `robots.txt` o no — da igual para el bot (lo consume el servidor, no un crawler); pero **no** exponer stock exacto si no quieren (ver `disponibilidad`).
+- **Respuesta OK:** `200` con `Content-Type: application/json; charset=utf-8`.
+- **Si el producto no existe:** `404` (idealmente con cuerpo `{ "error": "no encontrado" }`, pero el bot acepta cualquier 404 y entonces comparte el enlace sin inventar).
+- **Autenticación:** ninguna, igual que `/api/buscar`. Es solo lectura.
+- **CORS:** no hace falta. El bot llama **servidor a servidor** (Node `fetch` desde el backend del bot), no desde un navegador; no se necesitan cabeceras CORS.
+- **Volumen / caché:** muy bajo (≈1–2 llamadas por conversación). Pueden cachear la respuesta unos minutos sin problema.
+- **Nunca exponer el nombre del proveedor** (el bot no lo pide ni lo usa).
 
 ### Esquema JSON de la respuesta
 
+Los nombres de campo están alineados con lo que la tienda ya maneja por producto. **Obligatorios:** `nombre`, `url`, `precio`. El resto son opcionales (si no hay dato, omitir el campo o enviarlo vacío).
+
 ```jsonc
 {
-  "nombre": "Celular Xiaomi Redmi A7 Pro (4GB/64GB) Azul",   // obligatorio
-  "url": "https://store.pronetsys.com.co/producto/xiaomi-redmi-a7-pro-4gb-64gb", // obligatorio
-  "precio": "$432.000",                 // obligatorio, STRING ya formateado en COP
-  "iva": "Excluido de IVA (Art. 424 E.T.)", // texto tal como se muestra en la página; o "IVA incluido". Si no aplica, omitir o ""
-  "sku": "6932554493479",               // opcional (EAN/SKU)
-  "marca": "Xiaomi",                     // opcional
-  "categoria": "Celulares y tabletas",   // opcional
-  "disponibilidad": "Disponible",        // opcional: texto, NO cantidad exacta. Ej. "Disponible" / "Agotado" / "Bajo pedido"
-  "descripcion": "Smartphone con pantalla de 6.9\"...", // opcional, texto plano (sin HTML)
-  "caracteristicas": {                   // opcional: objeto clave→valor (preferido)
-    "Procesador": "UNISOC T7250 de 12 nm, ocho núcleos",
-    "RAM": "4 GB",
-    "Almacenamiento": "64 GB",
-    "Pantalla": "LCD 6.9\"",
-    "Batería": "6000 mAh",
-    "Cámara posterior": "13 MP",
-    "Cámara frontal": "8 MP",
-    "Sistema operativo": "HyperOS 3"
-  },
-  "garantia": "Garantía del fabricante; la tienda gestiona el proceso vía garantias@pronetsys.com.co" // opcional
+  "nombre": "Mouse Logitech Inalámbrico M170 Blanco",          // obligatorio
+  "url": "https://store.pronetsys.com.co/producto/mouse-logitech-inalambrico-m170-blanco", // obligatorio
+  "estado": "publicado",              // "publicado" | "descontinuado" (si no es publicado, el bot NO lo ofrece)
+  "condicion": "nuevo",               // "nuevo" | "reacondicionado" | "digital"
+  "disponibilidad": "Disponible",     // TEXTO, no cantidad. Ej. "Disponible" / "Agotado" / "Bajo pedido"
+
+  "precio": "$4.760",                 // obligatorio. STRING ya formateado = el precio que MUESTRA la ficha
+  "iva": "IVA incluido",              // texto literal tal como aparece en la ficha; o "Excluido de IVA (Art. 424 E.T.)"
+  "precioSinIva": "$4.000",           // opcional, string
+  "ivaPorcentaje": 19,                // opcional, número (0, 5, 19…)
+
+  "marca": "Logitech",                // opcional
+  "categoria": "Periféricos y accesorios", // opcional
+  "sku": "097855...",                 // opcional = referencia / EAN
+  "descripcion": "Mouse inalámbrico de 2.4 GHz...", // opcional, ficha corta en texto plano (sin HTML)
+
+  "caracteristicas": [                // opcional. Lista "Etiqueta: valor" (tal como la manejan) …
+    "Conexión: Inalámbrico 2.4 GHz",
+    "Alcance: 10 m",
+    "Batería: 1 pila AA (incluida)",
+    "Compatibilidad: Windows, macOS, Chrome OS"
+  ],
+  // … o como objeto { "Conexión": "Inalámbrico 2.4 GHz", "Alcance": "10 m" }. El bot acepta ambas formas.
+
+  "incluye": "Mouse, receptor USB nano, 1 pila AA",   // opcional (lo que trae la caja)
+  "garantia": "Garantía del fabricante; la tienda gestiona el proceso vía garantias@pronetsys.com.co", // opcional
+  "envio": "Desde Medellín a toda Colombia; no incluido en el precio, se paga contra entrega.", // opcional, texto
+  "imagenes": [ "https://store.pronetsys.com.co/media/p/...-1200.webp" ] // opcional (no se usa en WhatsApp por ahora)
 }
 ```
 
-Notas:
-- **`precio` siempre como STRING ya formateado** (ej. `"$432.000"`), igual que en `/api/buscar`. El bot lo repite tal cual; no hace cálculos de IVA.
-- **`iva`**: manden el texto literal que muestra la ficha ("IVA incluido" o "Excluido de IVA (Art. 424 E.T.)"). Es importante para que el bot no asuma el régimen.
-- **`caracteristicas`** puede ser un objeto `{clave: valor}` (preferido) **o** un arreglo
-  `[ { "nombre": "RAM", "valor": "4 GB" }, ... ]`; el bot acepta ambos.
-- **`descripcion`/`caracteristicas` en texto plano**, sin etiquetas HTML.
-- `disponibilidad` como texto, no número: no hace falta exponer el inventario exacto.
+### Reglas de datos importantes
+
+- **`precio` SIEMPRE como STRING ya formateado** (ej. `"$4.760"`), igual que en `/api/buscar`. El bot lo **repite tal cual** y **no** calcula IVA. Si quieren, `precioSinIva` e `ivaPorcentaje` van aparte como extras.
+- **`iva`**: el **texto literal** que muestra la ficha (`"IVA incluido"` o `"Excluido de IVA (Art. 424 E.T.)"`). Es clave para que el bot no asuma el régimen tributario.
+- **`caracteristicas`** puede ser **arreglo** de strings `"Etiqueta: valor"` (lo que ya tienen) **o** un objeto `{clave: valor}`; el bot soporta las dos.
+- **`descripcion` / `caracteristicas` en texto plano**, sin etiquetas HTML.
+- **`disponibilidad`** y **`estado`** como texto; no hace falta exponer inventario exacto. Si `estado` ≠ `"publicado"`, el bot avisa que no está disponible y no lo ofrece.
 
 ### Ejemplo de llamada
 
 ```
-GET https://store.pronetsys.com.co/api/producto/xiaomi-redmi-a7-pro-4gb-64gb
+GET https://store.pronetsys.com.co/api/producto/mouse-logitech-inalambrico-m170-blanco
 Accept: application/json
 → 200  { ...el objeto de arriba... }
+
+GET .../api/producto/no-existe-123
+→ 404  { "error": "no encontrado" }
 ```
 
 ---
 
 ## Lado del bot (ya implementado)
 
-- Nuevas herramientas: `buscar_en_tienda` (usa `/api/buscar`) y `ver_producto_tienda` (usa `/api/producto/{slug}`).
-- Config: `ENABLE_TIENDA=true` y `STORE_URL=https://store.pronetsys.com.co` (panel → "Tienda virtual").
-- **Mientras el endpoint no exista**, `ver_producto_tienda` recibe el 404 y el bot responde compartiendo el enlace del producto, sin inventar especificaciones. La **búsqueda con precios ya funciona hoy**.
-- El bot tiene instrucción estricta de **no inventar** nada que no venga de la tienda y de repetir el precio (con su nota de IVA) tal cual.
+- Herramientas: `buscar_en_tienda` (usa `/api/buscar`) y `ver_producto_tienda` (usa `/api/producto/{slug}`).
+- Config: `ENABLE_TIENDA=true`, `STORE_URL=https://store.pronetsys.com.co` (ya activo en producción).
+- **Mientras el endpoint no exista**, `ver_producto_tienda` recibe el 404 y el bot comparte el enlace del producto sin inventar especificaciones. La **búsqueda con precios ya funciona**.
+- El bot repite el precio (con su nota de IVA) tal cual y tiene instrucción estricta de **no inventar** nada que no venga de la tienda.
 
-Cuando desplieguen `GET /api/producto/{slug}`, no hay que tocar el bot: empieza a dar características automáticamente.
+Cuando desplieguen `GET /api/producto/{slug}` no hay que tocar el bot: empieza a dar características automáticamente.

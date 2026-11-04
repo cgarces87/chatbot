@@ -839,23 +839,28 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
       if (d.noDisponible) {
         return `No tengo el detalle estructurado de ese producto. Comparte el enlace para que el cliente vea las características completas: ${args.url}. PROHIBIDO inventar especificaciones.`;
       }
+      const descontinuado = d.estado && String(d.estado).toLowerCase() !== 'publicado';
       const lineas = [];
       if (d.nombre) lineas.push(`Producto: ${d.nombre}`);
+      if (descontinuado) lineas.push(`Estado: ${d.estado} (NO lo ofrezcas para compra; avísale al cliente que ya no está disponible)`);
       if (d.precio) lineas.push(`Precio: ${d.precio}${d.iva ? ` (${d.iva})` : ''}`);
+      if (d.condicion) lineas.push(`Condición: ${d.condicion}`);
       if (d.disponibilidad) lineas.push(`Disponibilidad: ${d.disponibilidad}`);
       if (d.marca) lineas.push(`Marca: ${d.marca}`);
       if (d.categoria) lineas.push(`Categoría: ${d.categoria}`);
-      if (d.sku) lineas.push(`SKU: ${d.sku}`);
+      if (d.sku) lineas.push(`Referencia/SKU: ${d.sku}`);
       if (d.descripcion) lineas.push(`Descripción: ${d.descripcion}`);
       if (d.caracteristicas) {
         const car = Array.isArray(d.caracteristicas)
-          ? d.caracteristicas.map((c) => `  • ${typeof c === 'string' ? c : `${c.nombre || c.clave || ''}: ${c.valor || ''}`.trim()}`)
+          ? d.caracteristicas.map((c) => `  • ${typeof c === 'string' ? c : `${c.nombre || c.clave || c.etiqueta || ''}: ${c.valor || ''}`.trim()}`)
           : Object.entries(d.caracteristicas).map(([k, v]) => `  • ${k}: ${v}`);
         if (car.length) lineas.push(`Características:\n${car.join('\n')}`);
       }
+      if (d.incluye) lineas.push(`Incluye: ${d.incluye}`);
       if (d.garantia) lineas.push(`Garantía: ${d.garantia}`);
+      if (d.envio) lineas.push(`Envío: ${d.envio}`);
       lineas.push(`Enlace: ${d.url || args.url}`);
-      console.log(`🛒 (chat) ${chatId} vio producto: ${d.nombre || args.url}`);
+      console.log(`🛒 (chat) ${chatId} vio producto: ${d.nombre || args.url}${descontinuado ? ' [descontinuado]' : ''}`);
       return `Detalle del producto (responde SOLO con estos datos, con el precio y su nota de IVA TAL CUAL; PROHIBIDO inventar lo que no esté aquí):\n${lineas.join('\n')}`;
     } catch (e) {
       console.warn('🛒 tienda detalle error:', e.message);
