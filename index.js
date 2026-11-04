@@ -25,6 +25,7 @@ const flow = require('./lib/flow');
 const calendar = require('./lib/calendar');
 const mailer = require('./lib/mailer');
 const glpi = require('./lib/glpi');
+const tienda = require('./lib/tienda');
 const saldoOpenai = require('./lib/saldo-openai');
 
 // ---------------- Configuracion fija (.env) ----------------
@@ -66,7 +67,14 @@ const runtime = {
   enableSmtp: (process.env.ENABLE_SMTP ?? 'false') === 'true',
   enablePagos: (process.env.ENABLE_PAGOS ?? 'false') === 'true',
   enableGlpi: (process.env.ENABLE_GLPI ?? 'false') === 'true',
+  enableTienda: (process.env.ENABLE_TIENDA ?? 'false') === 'true',
 };
+
+// Configura el módulo de la tienda virtual con los valores del entorno
+function configurarTienda() {
+  tienda.configurar({ url: process.env.STORE_URL || '' });
+}
+configurarTienda();
 
 // Configura el módulo de GLPI (tickets de soporte) con los valores del entorno
 function configurarGlpi() {
@@ -535,6 +543,32 @@ const HERRAMIENTA_CASOS_ABIERTOS = {
   },
 };
 
+// Herramientas de la tienda virtual (store.pronetsys.com.co)
+const HERRAMIENTA_TIENDA_BUSCAR = {
+  type: 'function',
+  function: {
+    name: 'buscar_en_tienda',
+    description: 'Busca productos en la tienda virtual de Pronetsys (store.pronetsys.com.co) por nombre o palabra clave y devuelve nombre, precio y enlace. Úsala cuando el cliente pregunte por un producto, su precio o disponibilidad (equipos, portátiles, periféricos, licencias de software, redes, CCTV, impresión, UPS, etc.).',
+    parameters: {
+      type: 'object',
+      properties: { consulta: { type: 'string', description: 'Texto a buscar (ej. "mouse logitech", "portátil dell", "licencia office").' } },
+      required: ['consulta'],
+    },
+  },
+};
+const HERRAMIENTA_TIENDA_PRODUCTO = {
+  type: 'function',
+  function: {
+    name: 'ver_producto_tienda',
+    description: 'Obtiene el detalle de UN producto de la tienda (características/especificaciones, precio, disponibilidad y garantía) a partir de su enlace. Úsala cuando el cliente pida características o detalles de un producto específico que apareció en la búsqueda.',
+    parameters: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'URL del producto en store.pronetsys.com.co (de buscar_en_tienda).' } },
+      required: ['url'],
+    },
+  },
+};
+
 // Herramienta para enviar el QR de pago (Bre-B) como imagen
 const HERRAMIENTA_QR = {
   type: 'function',
@@ -587,6 +621,7 @@ function herramientasActivas() {
   if (runtime.enableSmtp && mailer.disponible()) t.push(HERRAMIENTA_CORREO);
   if (runtime.enablePagos && qrDisponible()) t.push(HERRAMIENTA_QR);
   if (runtime.enableGlpi && glpi.disponible()) t.push(HERRAMIENTA_BUSCAR_ENTIDAD, HERRAMIENTA_TICKET_PREPARAR, HERRAMIENTA_TICKET_FINALIZAR, HERRAMIENTA_TICKET_ESTADO, HERRAMIENTA_CASOS_ABIERTOS);
+  if (runtime.enableTienda && tienda.disponible()) t.push(HERRAMIENTA_TIENDA_BUSCAR, HERRAMIENTA_TIENDA_PRODUCTO);
   return t;
 }
 
@@ -782,6 +817,51 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     console.log(`🎫 (chat) ${chatId} listó ${lista.length} caso(s) abierto(s) de entidad ${args.entityId}`);
     return `Casos abiertos de la empresa (preséntaselos al cliente de forma clara):\n${conComentario.join('\n')}`;
   }
+  if (nombre === 'buscar_en_tienda') {
+    try {
+      const r = await tienda.buscar(args.consulta);
+      if (!r.items.length) {
+        return `No encontré productos para "${args.consulta}" en la tienda. Dile al cliente que no aparece con ese término y ofrécele revisar la tienda (${tienda.conf.url}) o conectarlo con un asesor. PROHIBIDO inventar productos o precios.`;
+      }
+      const lineas = r.items.map((p) => `- ${p.nombre} — ${p.precio} → ${p.url}`).join('\n');
+      console.log(`🛒 (chat) ${chatId} buscó en tienda: "${args.consulta}" -> ${r.items.length} resultado(s)`);
+      return `Resultados de la tienda para "${args.consulta}"${r.total > r.items.length ? ` (mostrando ${r.items.length} de ${r.total})` : ''}:\n${lineas}\n\n`
+        + 'Preséntaselos al cliente con su precio TAL CUAL (si el precio trae una nota de IVA como "IVA incluido" o "Excluido de IVA", mantenla; NO calcules ni modifiques el IVA). '
+        + 'Para características de uno específico, usa "ver_producto_tienda" con su url. PROHIBIDO inventar datos que no estén aquí.';
+    } catch (e) {
+      console.warn('🛒 tienda buscar error:', e.message);
+      return `No pude consultar la tienda en este momento. Comparte el enlace para que el cliente la revise (${tienda.conf.url}) o conéctalo con un asesor. PROHIBIDO inventar productos o precios.`;
+    }
+  }
+  if (nombre === 'ver_producto_tienda') {
+    try {
+      const d = await tienda.detalle(args.url);
+      if (d.noDisponible) {
+        return `No tengo el detalle estructurado de ese producto. Comparte el enlace para que el cliente vea las características completas: ${args.url}. PROHIBIDO inventar especificaciones.`;
+      }
+      const lineas = [];
+      if (d.nombre) lineas.push(`Producto: ${d.nombre}`);
+      if (d.precio) lineas.push(`Precio: ${d.precio}${d.iva ? ` (${d.iva})` : ''}`);
+      if (d.disponibilidad) lineas.push(`Disponibilidad: ${d.disponibilidad}`);
+      if (d.marca) lineas.push(`Marca: ${d.marca}`);
+      if (d.categoria) lineas.push(`Categoría: ${d.categoria}`);
+      if (d.sku) lineas.push(`SKU: ${d.sku}`);
+      if (d.descripcion) lineas.push(`Descripción: ${d.descripcion}`);
+      if (d.caracteristicas) {
+        const car = Array.isArray(d.caracteristicas)
+          ? d.caracteristicas.map((c) => `  • ${typeof c === 'string' ? c : `${c.nombre || c.clave || ''}: ${c.valor || ''}`.trim()}`)
+          : Object.entries(d.caracteristicas).map(([k, v]) => `  • ${k}: ${v}`);
+        if (car.length) lineas.push(`Características:\n${car.join('\n')}`);
+      }
+      if (d.garantia) lineas.push(`Garantía: ${d.garantia}`);
+      lineas.push(`Enlace: ${d.url || args.url}`);
+      console.log(`🛒 (chat) ${chatId} vio producto: ${d.nombre || args.url}`);
+      return `Detalle del producto (responde SOLO con estos datos, con el precio y su nota de IVA TAL CUAL; PROHIBIDO inventar lo que no esté aquí):\n${lineas.join('\n')}`;
+    } catch (e) {
+      console.warn('🛒 tienda detalle error:', e.message);
+      return `No pude obtener el detalle de ese producto. Comparte el enlace para que el cliente lo revise: ${args.url}. PROHIBIDO inventar especificaciones.`;
+    }
+  }
   if (nombre === 'enviar_correo') {
     await mailer.enviar({ to: args.para, subject: args.asunto, text: args.mensaje });
     console.log(`✉️  (chat) ${chatId} envió correo a ${args.para}`);
@@ -851,6 +931,16 @@ Para CUALQUIER gestión de soporte (crear o consultar tickets) sigue este orden,
    - Si NO sabe el número: llama "listar_casos_abiertos" con el entityId y muéstrale sus casos abiertos con el último comentario.
 
 AISLAMIENTO (CRÍTICO): solo puedes dar información de la empresa cuyo NIT entregó el cliente en ESTA conversación. PROHIBIDO revelar, listar o insinuar qué otras empresas/entidades existen, aunque lo pidan. PROHIBIDO dar información de tickets de otra empresa. PROHIBIDO inventar números de ticket, estados o comentarios: usa solo lo que devuelvan las herramientas.`;
+  }
+  if (runtime.enableTienda && tienda.disponible()) {
+    sys += `\n\n=== TIENDA VIRTUAL (${tienda.conf.url}) ===
+Pronetsys tiene una tienda en línea de productos físicos y licencias (portátiles, equipos de escritorio, todo en uno, periféricos, redes, CCTV/seguridad, impresión, UPS, telefonía IP, celulares/tabletas, servidores, licencias de software, etc.) con precios publicados.
+- Cuando el cliente pregunte por un producto, su precio, disponibilidad o características, usa "buscar_en_tienda" y luego "ver_producto_tienda". Da ÚNICAMENTE información que devuelvan esas herramientas: está TERMINANTEMENTE PROHIBIDO inventar productos, precios, especificaciones o disponibilidad que no vengan de la tienda.
+- Si no encuentras el producto o no obtienes el detalle, dilo con claridad y comparte el enlace de la tienda; ofrece conectar con un asesor. NO supongas ni completes datos de tu conocimiento general.
+- PRECIOS: repite el precio TAL CUAL lo entrega la tienda, incluida su nota ("IVA incluido" o "Excluido de IVA") si la trae. NO calcules, agregues ni quites IVA tú.
+- ENVÍOS: desde Medellín a toda Colombia; el envío NO está incluido en el precio y se paga contra entrega a la transportadora. El software/licencias se entrega por correo tras confirmar el pago. Más detalle: ${tienda.conf.url}/politicas/envios.
+- GARANTÍA: los productos nuevos tienen garantía del fabricante y la tienda gestiona el proceso vía garantias@pronetsys.com.co.
+- COMPRA: el pago es anticipado por transferencia; para comprar, comparte el enlace del producto y, si hace falta, conéctalo con un asesor.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];
@@ -1605,6 +1695,8 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM'].some(k => updates[k] !== undefined)) configurarCorreo();
     if (updates.ENABLE_PAGOS !== undefined) runtime.enablePagos = updates.ENABLE_PAGOS === 'true';
     if (updates.ENABLE_GLPI !== undefined) runtime.enableGlpi = updates.ENABLE_GLPI === 'true';
+    if (updates.ENABLE_TIENDA !== undefined) runtime.enableTienda = updates.ENABLE_TIENDA === 'true';
+    if (updates.STORE_URL !== undefined) configurarTienda();
     if (['GLPI_URL', 'GLPI_APP_TOKEN', 'GLPI_USER_TOKEN'].some(k => updates[k] !== undefined)) configurarGlpi();
 
     // Cambio de sesión de WhatsApp EN VIVO: mueve el webhook a la nueva sesión
@@ -1950,6 +2042,7 @@ let tunnelProc = null;
   console.log(`📅 Calendario: ${runtime.enableCalendar ? (calendar.disponible() ? 'ACTIVO (herramienta agendar_evento disponible)' : 'activado pero SIN credenciales/ID') : 'desactivado'}`);
   console.log(`✉️  Correo SMTP: ${runtime.enableSmtp ? (mailer.disponible() ? 'ACTIVO' : 'activado pero sin host/usuario/clave') : 'desactivado'}`);
   console.log(`🎫 Soporte GLPI: ${runtime.enableGlpi ? (glpi.disponible() ? 'ACTIVO (tickets disponibles)' : 'activado pero sin URL/tokens') : 'desactivado'}`);
+  console.log(`🛒 Tienda virtual: ${runtime.enableTienda ? (tienda.disponible() ? 'ACTIVA (' + tienda.conf.url + ')' : 'activada pero sin STORE_URL') : 'desactivada'}`);
   console.log(`🔧 Herramientas del bot activas: ${herramientasActivas().map((t) => t.function.name).join(', ') || 'NINGUNA'}`);
 
   // Monitor de saldo de OpenAI (alertas por correo + WhatsApp cuando queda poco/se agota)
