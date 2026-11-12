@@ -1,5 +1,7 @@
 # Secretos y configuracion local
 .env
+# Config de despliegue local (clave del VPS) — usar scripts/deploy.env.example
+scripts/deploy.env
 # Config local de Claude Code (personal, no del proyecto)
 .claude/settings.local.json
 # Dependencias

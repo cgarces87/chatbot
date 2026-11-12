@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node supervisor.js",
-    "start:once": "node index.js"
+    "start:once": "node index.js",
+    "sync-taty": "bash scripts/sync-plantillas-taty.sh"
   },
   "keywords": [
     "whatsapp",
