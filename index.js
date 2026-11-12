@@ -110,14 +110,42 @@ function configurarCorreo() {
 }
 configurarCorreo();
 
-// Plantilla HTML de confirmación de cita (se carga una vez)
-let _plantillaCita;
-function plantillaCita() {
-  if (_plantillaCita === undefined) {
-    try { _plantillaCita = fs.readFileSync(path.join(__dirname, 'templates', 'cita.html'), 'utf8'); }
-    catch { _plantillaCita = ''; }
+// Plantillas de confirmación de cita (se cargan una vez). La genérica (POSFAC/otros)
+// y las personalizadas de Taty (correo HTML + texto de WhatsApp).
+const _plantillasCache = {};
+function leerPlantilla(archivo) {
+  if (_plantillasCache[archivo] === undefined) {
+    try { _plantillasCache[archivo] = fs.readFileSync(path.join(__dirname, 'templates', archivo), 'utf8'); }
+    catch { _plantillasCache[archivo] = ''; }
   }
-  return _plantillaCita;
+  return _plantillasCache[archivo];
+}
+function plantillaCita() { return leerPlantilla('cita.html'); }
+function plantillaCitaTatyHtml() { return leerPlantilla('taty-citacion-demo.html'); }
+function plantillaCitaTatyTxt() { return leerPlantilla('taty-citacion-demo.txt'); }
+
+// ¿La demo/cita es del producto Taty? (según la interfaz o el título)
+function esDemoTaty(datos = {}) {
+  return /\btaty\b/i.test(`${datos.interfaz || ''} ${datos.titulo || ''}`);
+}
+
+// Marcadores comunes de las plantillas de cita ([NOMBRE_CLIENTE], [FECHA_DEMO], etc.)
+function replCita(evento, datos) {
+  const d = datosCita(evento, datos);
+  return {
+    '[NOMBRE_CLIENTE]': d.nombreCliente || 'cliente',
+    '[NOMBRE_EMPRESA]': d.empresa || '—',
+    '[FECHA_DEMO]': d.fFecha,
+    '[HORA_INICIO]': d.fHoraIni,
+    '[HORA_FIN]': d.fHoraFin,
+    '[DURACION]': d.dur,
+    '[ENLACE_MEET]': d.meet,
+  };
+}
+function aplicarPlantilla(tpl, repl) {
+  let out = tpl;
+  for (const [k, v] of Object.entries(repl)) out = out.split(k).join(v || '');
+  return out;
 }
 
 // Calcula los datos formateados de una cita (fecha/hora en español, Colombia)
@@ -162,6 +190,14 @@ function mensajeCitaWhatsApp(evento, datos = {}) {
   return L.join('\n');
 }
 
+// Confirmación de cita para WhatsApp con la plantilla PERSONALIZADA de Taty.
+// Si la plantilla no está disponible, cae en el mensaje genérico.
+function mensajeCitaTatyWhatsApp(evento, datos = {}) {
+  const tpl = plantillaCitaTatyTxt();
+  if (!tpl) return mensajeCitaWhatsApp(evento, datos);
+  return aplicarPlantilla(tpl, replCita(evento, datos)).trim();
+}
+
 // Envía la confirmación de una cita por correo (al cliente y/o a ti)
 //  datos: { emailCliente, nombreCliente, empresa }  (también acepta solo el email como string)
 async function confirmarCita(evento, datos = {}) {
@@ -174,21 +210,12 @@ async function confirmarCita(evento, datos = {}) {
 
   const { fFecha, fHoraIni, fHoraFin, dur, meet } = datosCita(evento, datos);
 
-  // Usa la plantilla bonita si existe; si no, un correo simple de respaldo
-  const tpl = plantillaCita();
+  // Plantilla: la personalizada de Taty si la demo es de Taty; si no, la genérica.
+  const taty = esDemoTaty(datos);
+  const tpl = (taty && plantillaCitaTatyHtml()) || plantillaCita();
   let html;
   if (tpl) {
-    const repl = {
-      '[NOMBRE_CLIENTE]': datos.nombreCliente || 'cliente',
-      '[NOMBRE_EMPRESA]': datos.empresa || '—',
-      '[FECHA_DEMO]': fFecha,
-      '[HORA_INICIO]': fHoraIni,
-      '[HORA_FIN]': fHoraFin,
-      '[DURACION]': dur,
-      '[ENLACE_MEET]': meet,
-    };
-    html = tpl;
-    for (const [k, v] of Object.entries(repl)) html = html.split(k).join(v || '');
+    html = aplicarPlantilla(tpl, replCita(evento, datos));
   } else {
     const cuando = (evento.inicio && (evento.inicio.dateTime || evento.inicio.date)) || '';
     html = `<p>Hola,</p><p>Tu cita ha quedado <b>agendada</b>:</p><ul>
@@ -198,7 +225,8 @@ async function confirmarCita(evento, datos = {}) {
   }
 
   try {
-    await mailer.enviar({ to: destinatarios.join(','), subject: `Confirmación de su cita: ${evento.titulo || 'Cita'}`, html });
+    const asunto = taty ? 'Confirmación de su demostración de Taty' : `Confirmación de su cita: ${evento.titulo || 'Cita'}`;
+    await mailer.enviar({ to: destinatarios.join(','), subject: asunto, html });
     console.log('✉️  Confirmación de cita enviada a', destinatarios.join(', '));
   } catch (e) { console.error('✉️  Error enviando confirmación:', e.message); }
 }
@@ -377,7 +405,7 @@ const HERRAMIENTA_CAL = {
         fin: { type: 'string', description: 'Fecha y hora de fin en ISO 8601 (opcional; si falta dura 1 hora).' },
         todoElDia: { type: 'boolean', description: 'true si es un recordatorio de día completo, sin hora.' },
         descripcion: { type: 'string', description: 'Detalles adicionales opcionales (NO repitas nombre/empresa/correo/interfaz: el sistema los agrega solo).' },
-        interfaz: { type: 'string', description: 'Nombre de la interfaz de POSFAC que el cliente quiere ver (ej. "Restobar", "POS", "Hospedaje").' },
+        interfaz: { type: 'string', description: 'Qué verá el cliente en la demo: una interfaz de POSFAC (ej. "Restobar", "POS", "Hospedaje") o el producto "Taty" si la demostración es de Taty. Ponlo SIEMPRE.' },
         emailCliente: { type: 'string', description: 'Correo del cliente para enviarle la confirmación (si lo proporciona).' },
         nombreCliente: { type: 'string', description: 'Nombre del cliente/contacto (si lo proporciona).' },
         empresa: { type: 'string', description: 'Nombre de la empresa del cliente (si lo proporciona).' },
@@ -397,9 +425,11 @@ const HERRAMIENTA_CLIENTE = {
     parameters: {
       type: 'object',
       properties: {
-        nombre: { type: 'string', description: 'Nombre del cliente (si lo dijo).' },
+        nombre: { type: 'string', description: 'Nombre completo del cliente (si lo dijo).' },
         email: { type: 'string', description: 'Correo electrónico del cliente (si lo dio).' },
+        telefono: { type: 'string', description: 'Teléfono de contacto que dé el cliente (si es distinto al de WhatsApp o si lo confirma).' },
         empresa: { type: 'string', description: 'Empresa del cliente (si la mencionó).' },
+        nit: { type: 'string', description: 'NIT de la empresa del cliente (para cotizaciones formales a empresa).' },
         interfaz: { type: 'string', description: 'Interfaz de POSFAC en la que mostró interés (si aplica).' },
         resumen: { type: 'string', description: 'Resumen breve (1-3 frases) de lo conversado y el estado de la gestión.' },
       },
@@ -683,8 +713,10 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
     args.descripcion = lineas.join('\n');
 
     const ev = await calendar.crearEvento(args);
-    console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '');
-    await confirmarCita(ev, { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa });
+    const datosCliente = { emailCliente: args.emailCliente, nombreCliente: args.nombreCliente, empresa: args.empresa, interfaz: args.interfaz, titulo: args.titulo };
+    const demoTaty = esDemoTaty(datosCliente);
+    console.log(`📅 (chat) ${chatId} agendó: ${ev.titulo}`, ev.meet ? '(con Meet)' : '', demoTaty ? '[Taty]' : '');
+    await confirmarCita(ev, datosCliente);
     // Actualizar la ficha del cliente automáticamente con lo que dio al agendar
     try {
       await store.upsertCliente(chatId, {
@@ -693,12 +725,13 @@ async function ejecutarHerramienta(nombre, args, chatId, ctx = {}) {
         resumen: `Agendó demo de ${args.interfaz || 'POSFAC'} para ${args.inicio}.`,
       });
     } catch (e) { console.warn('🗂️  No se pudo actualizar la ficha del cliente:', e.message); }
-    // La confirmación al cliente va con formato fijo (plantilla), no la deja parafrasear el modelo
-    ctx.respuestaDirecta = mensajeCitaWhatsApp(ev, args);
+    // La confirmación al cliente va con formato fijo (plantilla), no la deja parafrasear el modelo.
+    // Si la demo es de Taty, usa la plantilla personalizada de Taty.
+    ctx.respuestaDirecta = demoTaty ? mensajeCitaTatyWhatsApp(ev, datosCliente) : mensajeCitaWhatsApp(ev, datosCliente);
     return 'Cita agendada y confirmación enviada al cliente.';
   }
   if (nombre === 'guardar_cliente') {
-    await store.upsertCliente(chatId, { ...args, telefono: telefonoDe(chatId) });
+    await store.upsertCliente(chatId, { ...args, telefono: args.telefono || telefonoDe(chatId) });
     console.log(`🗂️  (chat) ${chatId} ficha de cliente actualizada`, args.nombre ? `(${args.nombre})` : '');
     return 'Ficha del cliente guardada. Continúa la conversación con normalidad.';
   }
@@ -885,6 +918,12 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
 
   const tools = herramientasActivas();
 
+  // Primer mensaje de la conversación: saludar y, si ya trae un interés, resolverlo de una vez
+  if (!prev.length) {
+    sys += `\n\n=== PRIMER MENSAJE DE LA CONVERSACIÓN ===
+Este es el primer mensaje del cliente. Incluya SIEMPRE un saludo cordial en su respuesta. Si el cliente SOLO saluda, devuélvale el saludo y pregúntele en qué puede ayudarle. Pero si en este primer mensaje YA menciona un producto, servicio o interés (un artículo de la tienda, POSFAC, Taty, soporte, una demo, un precio, etc.), salúdelo Y entréguele de inmediato la información que pide, usando las herramientas que correspondan (por ejemplo "buscar_en_tienda"). NO se limite a devolver el saludo ni le pida que repita lo que ya dijo.`;
+  }
+
   // Ficha del cliente (mini-CRM): si ya lo conocemos, dárselo al modelo
   let cliente = null;
   try { cliente = await store.getCliente(chatId); } catch { /* driver sin soporte */ }
@@ -892,18 +931,20 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
     const f = [];
     if (cliente.nombre) f.push(`Nombre: ${cliente.nombre}`);
     if (cliente.empresa) f.push(`Empresa: ${cliente.empresa}`);
+    if (cliente.nit) f.push(`NIT: ${cliente.nit}`);
     if (cliente.email) f.push(`Correo: ${cliente.email}`);
+    if (cliente.telefono) f.push(`Teléfono: ${cliente.telefono}`);
     if (cliente.interfaz) f.push(`Interfaz de interés: ${cliente.interfaz}`);
     if (cliente.resumen) f.push(`Resumen de gestiones anteriores: ${cliente.resumen}`);
     sys += `\n\nCLIENTE CONOCIDO (ficha guardada de contactos anteriores):\n- ${f.join('\n- ')}\nSalúdalo por su nombre y trátalo como cliente que regresa. NO vuelvas a pedirle datos que ya están en la ficha: si los necesitas para agendar, solo confírmalos (ej. "¿le envío la confirmación al correo que tenemos registrado?").`;
   }
-  sys += `\n\nFICHA DEL CLIENTE: cuando el cliente diga su nombre, correo o empresa, o muestre interés en una interfaz, llama la herramienta "guardar_cliente" con esos datos y un "resumen" breve actualizado de la conversación. Hazlo en el mismo turno en que el dato aparezca.`;
+  sys += `\n\nFICHA DEL CLIENTE: cuando el cliente diga su nombre, correo, teléfono, empresa o NIT, o muestre interés en una interfaz, llama la herramienta "guardar_cliente" con esos datos y un "resumen" breve actualizado de la conversación. Hazlo en el mismo turno en que el dato aparezca.`;
   if (runtime.enableCalendar && calendar.disponible()) {
     const ahora = new Date().toLocaleString('es-CO', { timeZone: calendar.conf.timezone });
     sys += `\n\n=== AGENDAMIENTO DE CITAS (REGLA OBLIGATORIA, PRIORIDAD MÁXIMA) ===
 Fecha y hora actual: ${ahora} (zona ${calendar.conf.timezone}).
 Tienes una herramienta (función) llamada "agendar_evento". Es la ÚNICA forma real de crear una cita: si NO la llamas, NO ocurre nada (no se crea el evento, no se envía el correo, el cliente NO recibe nada).
-- Cuando el cliente confirme el motivo/interfaz y un horario, tu siguiente acción DEBE ser llamar la herramienta "agendar_evento" con: titulo, inicio, fin (45 minutos después del inicio), conMeet=true, emailCliente, nombreCliente y empresa.
+- Cuando el cliente confirme el motivo/interfaz y un horario, tu siguiente acción DEBE ser llamar la herramienta "agendar_evento" con: titulo, inicio, fin (45 minutos después del inicio), conMeet=true, emailCliente, nombreCliente, empresa e interfaz. Si la demostración es de *Taty*, pon interfaz="Taty": el sistema enviará automáticamente la plantilla personalizada de Taty (correo + WhatsApp). Para demos de POSFAC, pon la interfaz de POSFAC correspondiente.
 - ESTÁ TERMINANTEMENTE PROHIBIDO decir que una cita "quedó agendada", "fue cancelada" o que "se envió un correo de confirmación" si NO has llamado la herramienta en este mismo turno. Afirmarlo sin llamarla es ENGAÑAR al cliente.
 - NO escribas mensajes de relleno tipo "un momento por favor". NO redactes tú la confirmación ni repitas los datos. Después de llamar la herramienta, el sistema envía automáticamente el correo (con la plantilla oficial) y el mensaje de WhatsApp con el formato correcto; tú no escribes nada más.
 - Las herramientas se usan ÚNICAMENTE invocándolas por function calling. PROHIBIDO escribir JSON, llaves {} o los argumentos de una herramienta en el texto de la respuesta: eso NO ejecuta nada y el cliente lo vería. Tampoco anuncies "voy a agendar" o "ahora realizo la gestión": invoca la herramienta de inmediato, en este mismo turno.
@@ -949,7 +990,9 @@ Pronetsys tiene una tienda en línea de productos físicos y licencias (portáti
 - PRECIOS: repite el precio TAL CUAL lo entrega la tienda, incluida su nota ("IVA incluido" o "Excluido de IVA") si la trae. NO calcules, agregues ni quites IVA tú.
 - ENVÍOS: desde Medellín a toda Colombia; el envío NO está incluido en el precio y se paga contra entrega a la transportadora. El software/licencias se entrega por correo tras confirmar el pago. Más detalle: ${tienda.conf.url}/politicas/envios.
 - GARANTÍA (si el producto trae su propio texto de garantía en el detalle, usa ESE; esta es la política general): Nuevos → garantía del *fabricante*, se tramita en el centro de servicio autorizado de la marca; si llega con defecto de fábrica, hay cambio por la misma referencia dentro de 7 días hábiles. NO digas que la tienda gestiona la garantía de los productos nuevos. Reacondicionados → 6 meses con Pronetsys. Licencias → soporte de activación.
-- COMPRA: el pago es anticipado por transferencia; para comprar, comparte el enlace del producto y, si hace falta, conéctalo con un asesor.`;
+- COMPRA: el pago es anticipado por transferencia; para comprar, comparte el enlace del producto y, si hace falta, conéctalo con un asesor.
+- ACTITUD DE VENTAS: cuando el cliente pregunte por artículos de la tienda, compórtate como un ASESOR COMERCIAL: sé proactivo y cordial, resalta los beneficios, resuelve dudas, sugiere alternativas o accesorios relacionados que EXISTAN en la tienda (verifícalos con las herramientas), y guía con naturalidad hacia la compra o la cotización. Sin presionar, sin inventar y sin prometer lo que no esté confirmado.
+- COTIZACIÓN FORMAL: si el cliente pide una cotización formal de uno o varios productos, sigue la regla de "Cotizaciones formales" de la guía: pide y confirma Nombre completo, Correo, Teléfono y —si es empresa— Nombre y NIT de la empresa; guárdalos con "guardar_cliente" y pregúntale si la quiere por correo o por WhatsApp.`;
   }
 
   const messages = [{ role: 'system', content: sys }, ...prev, { role: 'user', content: userMessage }];

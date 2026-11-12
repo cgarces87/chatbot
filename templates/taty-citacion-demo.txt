@@ -1,0 +1,55 @@
+¡Hola, *[NOMBRE_CLIENTE]*! 👋
+Le saluda el equipo de *Taty*, un producto de *Pronetsys S.A.S.*
+
+Agradecemos el interés mostrado en nuestra solución. Nos complace confirmar su *demostración en vivo* de Taty, donde verá el recorrido completo de un pedido: de la tienda a la factura electrónica DIAN, pasando por la bodega, el despacho y el recaudo. 🚀
+
+━━━━━━━━━━━━━━━━━━
+📅 *DETALLES DE LA CITA*
+━━━━━━━━━━━━━━━━━━
+
+🏢 *Empresa:* [NOMBRE_EMPRESA]
+👤 *Contacto:* [NOMBRE_CLIENTE]
+🗓️ *Fecha:* [FECHA_DEMO]
+🕐 *Hora:* [HORA_INICIO] – [HORA_FIN] _(hora Colombia)_
+⏱️ *Duración:* [DURACION] aproximadamente
+
+━━━━━━━━━━━━━━━━━━
+💻 *ENLACE DE LA REUNIÓN*
+━━━━━━━━━━━━━━━━━━
+
+La demo se realizará por *Google Meet*. Únase desde el siguiente enlace a la hora indicada 👇
+
+🔗 *Ingrese aquí:* [ENLACE_MEET]
+
+━━━━━━━━━━━━━━━━━━
+✅ *QUÉ VERÁ EN LA DEMO*
+━━━━━━━━━━━━━━━━━━
+
+• Toma de pedidos en la app Android, con o sin señal
+• Rutero con GPS y bonificaciones automáticas
+• Inventario, planillas de despacho y bodega
+• Entregas, devoluciones, recaudo y consignaciones
+• Facturación electrónica DIAN con Siigo, Loggro o el combo POSFAC
+• Panel de la oficina: ventas, cartera y rutas en vivo
+• Precios y proceso de implementación
+
+━━━━━━━━━━━━━━━━━━
+📝 *RECOMENDACIONES*
+━━━━━━━━━━━━━━━━━━
+
+• Conéctese 5 minutos antes desde un computador o celular con buena conexión a internet
+• Tenga a la mano las preguntas sobre su operación (vendedores, conductores, rutas y con qué factura hoy)
+• Si no puede asistir, avísenos con anticipación para reagendar
+
+🎬 Mientras tanto, vea *Taty en un minuto:* https://taty.store/#video
+
+━━━━━━━━━━━━━━━━━━
+
+¿Necesita reagendar o tiene alguna duda? Responda este mensaje y con gusto le ayudamos. 🙌
+
+¡Le esperamos! 🎯
+
+Equipo Comercial Taty
+📧 contactenos@pronetsys.com.co
+📞 3503950538
+🌐 taty.store
