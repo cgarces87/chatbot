@@ -1967,6 +1967,30 @@ app.post('/api/admin/clientes/update', authAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/admin/clientes/create', authAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const nombre = String(b.nombre || '').trim();
+    const telefono = String(b.telefono || '').replace(/[^\d]/g, '');
+    const email = String(b.email || '').trim();
+    const empresa = String(b.empresa || '').trim();
+    const nit = String(b.nit || '').replace(/[^\d]/g, '');
+    const interfaz = String(b.interfaz || '').trim();
+    const resumen = String(b.resumen || '').trim();
+    if (!nombre && !telefono) return res.status(400).json({ error: 'Indica al menos el nombre o el teléfono del cliente.' });
+    // La clave del CRM es el chatId de WhatsApp. Con teléfono usamos <numero>@c.us
+    // (así, si ese contacto escribe luego, el bot reconoce la misma ficha).
+    const chatId = telefono ? `${telefono}@c.us` : `manual-${Date.now()}@manual`;
+    if (typeof store.getCliente === 'function') {
+      const existe = await store.getCliente(chatId);
+      if (existe) return res.status(409).json({ error: 'Ya existe una ficha con ese teléfono. Edítala desde la lista.' });
+    }
+    await store.upsertCliente(chatId, { nombre, telefono, email, empresa, nit, interfaz, resumen });
+    console.log('🗂️  Ficha de cliente creada desde el panel:', chatId);
+    res.json({ ok: true, chatId });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/clientes/delete', authAdmin, async (req, res) => {
   try {
     const { chatId } = req.body || {};

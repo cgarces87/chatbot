@@ -362,7 +362,30 @@
             <h2>Clientes registrados</h2>
             <p style="font-size:12px;color:var(--muted);margin:0 0 12px">
               Fichas que el bot guarda automáticamente durante las conversaciones (nombre, contacto, interés y resumen).
+              También puedes crear una ficha a mano con el botón <b>Nuevo cliente</b>.
             </p>
+            <div class="solo-admin" style="margin:0 0 12px">
+              <button type="button" id="cliNuevoBtn" style="margin:0">➕ Nuevo cliente</button>
+            </div>
+            <div id="cliNuevoForm" class="solo-admin" style="display:none;border:1px solid var(--border);border-radius:8px;padding:14px;margin:0 0 14px;background:var(--bg)">
+              <h3 style="margin:0 0 10px;font-size:14px">Nueva ficha de cliente</h3>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+                <label style="font-size:12px;color:var(--muted)">Nombre de contacto<input id="nvNombre" style="margin:4px 0 0"></label>
+                <label style="font-size:12px;color:var(--muted)">Teléfono (solo números, con indicativo)<input id="nvTel" inputmode="numeric" placeholder="573001234567" style="margin:4px 0 0"></label>
+                <label style="font-size:12px;color:var(--muted)">Correo electrónico<input id="nvEmail" type="email" style="margin:4px 0 0"></label>
+                <label style="font-size:12px;color:var(--muted)">Empresa<input id="nvEmpresa" style="margin:4px 0 0"></label>
+                <label style="font-size:12px;color:var(--muted)">NIT (si es empresa)<input id="nvNit" inputmode="numeric" style="margin:4px 0 0"></label>
+                <label style="font-size:12px;color:var(--muted)">Interfaz / producto de interés<input id="nvInterfaz" placeholder="Taty, Restobar, Gastro…" style="margin:4px 0 0"></label>
+              </div>
+              <label style="display:block;font-size:12px;color:var(--muted);margin:10px 0 0">Resumen / nota
+                <textarea id="nvResumen" rows="2" style="margin:4px 0 0;width:100%"></textarea>
+              </label>
+              <div style="margin:12px 0 0">
+                <button type="button" id="cliCrearBtn" style="margin:0">💾 Crear ficha</button>
+                <button type="button" class="ghost" id="cliCancelarBtn" style="margin:0 0 0 6px">✖ Cancelar</button>
+                <span id="cliNuevoMsg" style="font-size:12px;margin-left:10px"></span>
+              </div>
+            </div>
             <div style="overflow-x:auto">
               <table id="cliTabla" style="width:100%;border-collapse:collapse;font-size:13px"></table>
             </div>
@@ -1058,6 +1081,41 @@
         const r = await fetch('/api/admin/clientes/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (r.ok) cargarClientes(); else alert('Error guardando: ' + ((await r.json()).error || r.status));
       }
+    });
+
+    // ---- Crear ficha de cliente a mano ----
+    function cliNuevoReset() {
+      ['nvNombre','nvTel','nvEmail','nvEmpresa','nvNit','nvInterfaz','nvResumen'].forEach(id => { const el = $('#'+id); if (el) el.value = ''; });
+      $('#cliNuevoMsg').textContent = '';
+    }
+    $('#cliNuevoBtn').addEventListener('click', () => {
+      const f = $('#cliNuevoForm');
+      const abrir = f.style.display === 'none';
+      f.style.display = abrir ? 'block' : 'none';
+      if (abrir) { cliNuevoReset(); $('#nvNombre').focus(); }
+    });
+    $('#cliCancelarBtn').addEventListener('click', () => { $('#cliNuevoForm').style.display = 'none'; });
+    $('#cliCrearBtn').addEventListener('click', async () => {
+      const msg = $('#cliNuevoMsg');
+      const body = {
+        nombre: $('#nvNombre').value.trim(),
+        telefono: $('#nvTel').value.replace(/[^\d]/g,''),
+        email: $('#nvEmail').value.trim(),
+        empresa: $('#nvEmpresa').value.trim(),
+        nit: $('#nvNit').value.replace(/[^\d]/g,''),
+        interfaz: $('#nvInterfaz').value.trim(),
+        resumen: $('#nvResumen').value.trim(),
+      };
+      if (!body.nombre && !body.telefono) { msg.style.color = '#c0392b'; msg.textContent = 'Indica al menos el nombre o el teléfono.'; return; }
+      const btn = $('#cliCrearBtn'); btn.disabled = true;
+      msg.style.color = 'var(--muted)'; msg.textContent = 'Guardando…';
+      try {
+        const r = await fetch('/api/admin/clientes/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) { $('#cliNuevoForm').style.display = 'none'; await cargarClientes(); }
+        else { msg.style.color = '#c0392b'; msg.textContent = d.error || ('Error ' + r.status); }
+      } catch (e) { msg.style.color = '#c0392b'; msg.textContent = 'Error: ' + e.message; }
+      finally { btn.disabled = false; }
     });
 
     $('#restartBtn').addEventListener('click', () => { if (confirm('¿Reiniciar el bot ahora?')) reiniciarBot(); });
