@@ -921,7 +921,8 @@ async function askOpenAI(chatId, userMessage, extraSystem = '') {
   // Primer mensaje de la conversación: saludar y, si ya trae un interés, resolverlo de una vez
   if (!prev.length) {
     sys += `\n\n=== PRIMER MENSAJE DE LA CONVERSACIÓN ===
-Este es el primer mensaje del cliente. Incluya SIEMPRE un saludo cordial en su respuesta. Si el cliente SOLO saluda, devuélvale el saludo y pregúntele en qué puede ayudarle. Pero si en este primer mensaje YA menciona un producto, servicio o interés (un artículo de la tienda, POSFAC, Taty, soporte, una demo, un precio, etc.), salúdelo Y entréguele de inmediato la información que pide, usando las herramientas que correspondan (por ejemplo "buscar_en_tienda"). NO se limite a devolver el saludo ni le pida que repita lo que ya dijo.`;
+Este es el primer mensaje del cliente. Incluya SIEMPRE un saludo cordial en su respuesta. Si el cliente SOLO saluda, devuélvale el saludo y pregúntele en qué puede ayudarle. Pero si en este primer mensaje YA menciona un producto, servicio o interés (un artículo de la tienda, POSFAC, Taty, soporte, una demo, un precio, etc.), salúdelo Y entréguele de inmediato la información que pide, usando las herramientas que correspondan (por ejemplo "buscar_en_tienda"). NO se limite a devolver el saludo ni le pida que repita lo que ya dijo.
+Si más abajo aparece una ficha de CLIENTE CONOCIDO, NO use la bienvenida genérica: trátelo como cliente que regresa, salúdelo por su nombre registrado y, si conoce su empresa, menciónela con naturalidad (ej. "¡Hola, [Nombre]! Qué gusto saludarle de nuevo."). No lo trate como si fuera la primera vez ni le pida datos que ya tenemos.`;
   }
 
   // Ficha del cliente (mini-CRM): si ya lo conocemos, dárselo al modelo
@@ -936,7 +937,7 @@ Este es el primer mensaje del cliente. Incluya SIEMPRE un saludo cordial en su r
     if (cliente.telefono) f.push(`Teléfono: ${cliente.telefono}`);
     if (cliente.interfaz) f.push(`Interfaz de interés: ${cliente.interfaz}`);
     if (cliente.resumen) f.push(`Resumen de gestiones anteriores: ${cliente.resumen}`);
-    sys += `\n\nCLIENTE CONOCIDO (ficha guardada de contactos anteriores):\n- ${f.join('\n- ')}\nSalúdalo por su nombre y trátalo como cliente que regresa. NO vuelvas a pedirle datos que ya están en la ficha: si los necesitas para agendar, solo confírmalos (ej. "¿le envío la confirmación al correo que tenemos registrado?").`;
+    sys += `\n\nCLIENTE CONOCIDO (ficha guardada de contactos anteriores — nos escribe desde un número/UID que ya reconocemos):\n- ${f.join('\n- ')}\nAl inicio del contacto salúdalo por su nombre registrado, UNA SOLA VEZ, y trátalo como cliente que regresa (ej. "¡Hola, [Nombre]! Qué gusto saludarle de nuevo."). Si tienes su empresa registrada, puedes mencionarla con naturalidad para dar continuidad. Ten presente la conversación y las gestiones anteriores con este cliente: están en el historial reciente de mensajes y en el "Resumen de gestiones anteriores"; retómalas en vez de empezar de cero. NO vuelvas a pedirle datos que ya están en la ficha: si los necesitas para agendar, solo confírmalos (ej. "¿le envío la confirmación al correo que tenemos registrado?").`;
   }
   sys += `\n\nFICHA DEL CLIENTE: cuando el cliente diga su nombre, correo, teléfono, empresa o NIT, o muestre interés en una interfaz, llama la herramienta "guardar_cliente" con esos datos y un "resumen" breve actualizado de la conversación. Hazlo en el mismo turno en que el dato aparezca.`;
   if (runtime.enableCalendar && calendar.disponible()) {
