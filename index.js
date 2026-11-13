@@ -68,6 +68,9 @@ const runtime = {
   enablePagos: (process.env.ENABLE_PAGOS ?? 'false') === 'true',
   enableGlpi: (process.env.ENABLE_GLPI ?? 'false') === 'true',
   enableTienda: (process.env.ENABLE_TIENDA ?? 'false') === 'true',
+  // Recordatorio por inactividad: si el cliente deja de escribir, el bot pregunta si sigue ahí
+  enableNudge: (process.env.ENABLE_NUDGE ?? 'true') === 'true',
+  nudgeSeconds: parseInt(process.env.NUDGE_SECONDS || '60', 10) || 60,
 };
 
 // Configura el módulo de la tienda virtual con los valores del entorno
@@ -359,6 +362,70 @@ function contarHandoff() {
   let n = 0;
   for (const [, until] of handoff) if (until > Date.now()) n++;
   return n;
+}
+
+// ============================================================
+//  Recordatorio por inactividad ("¿sigue ahí?")
+//  Si el cliente deja de escribir tras una respuesta del bot, a los
+//  NUDGE_SECONDS le preguntamos si sigue ahí / si aún le interesa el tema.
+//  Se dispara UNA sola vez por silencio: solo se re-arma tras una nueva
+//  respuesta del bot (es decir, cuando el cliente vuelve a escribir).
+// ============================================================
+const nudgeTimers = new Map(); // chatId -> timeout
+
+function cancelarNudge(chatId) {
+  const t = nudgeTimers.get(chatId);
+  if (t) { clearTimeout(t); nudgeTimers.delete(chatId); }
+}
+
+function programarNudge(chatId) {
+  cancelarNudge(chatId);
+  if (!runtime.enableNudge || !chatId) return;
+  // Solo chats personales (no grupos ni estados)
+  if (!(chatId.endsWith('@c.us') || chatId.endsWith('@lid'))) return;
+  const ms = Math.max(15, runtime.nudgeSeconds) * 1000;
+  const t = setTimeout(() => {
+    nudgeTimers.delete(chatId);
+    dispararNudge(chatId).catch((e) => console.warn('⏰ Recordatorio falló:', e.message));
+  }, ms);
+  if (t.unref) t.unref(); // no bloquear el cierre del proceso
+  nudgeTimers.set(chatId, t);
+}
+
+async function dispararNudge(chatId) {
+  // Revalidamos condiciones EN EL MOMENTO de disparar (el estado pudo cambiar)
+  if (!runtime.enableNudge) return;
+  if (runtime.paused) return;
+  if (estaIgnorado(chatId)) return;
+  if (handoffActivo(chatId)) return;          // un humano tomó la conversación
+  if (ticketEvidencia.has(chatId)) return;    // está adjuntando evidencia de un caso
+  const texto = await componerNudge(chatId);
+  if (!texto) return;
+  await sendWhatsApp(chatId, texto);
+  console.log(`⏰ Recordatorio de inactividad enviado a ${chatId}`);
+}
+
+// Redacta un recordatorio breve y contextual (menciona el tema pendiente si lo hubo).
+async function componerNudge(chatId) {
+  const fallback = '¿Sigue por ahí? 😊 Quedo atento por si desea continuar o si tiene cualquier otra pregunta.';
+  try {
+    const prev = await store.getRecent(chatId, 6);
+    if (!prev.length) return null;
+    // Si el cliente fue el último en escribir, no corresponde el recordatorio
+    const ultimo = prev[prev.length - 1];
+    if (ultimo && ultimo.role === 'user') return null;
+    const sys = 'Eres parte del equipo de Pronetsys atendiendo por WhatsApp. El cliente lleva un rato sin responder. Escribe UN mensaje MUY breve (1 o 2 frases), cordial y tratándolo de USTED (PROHIBIDO tutear: nada de "tú", "te", "tienes"). Pregúntele amablemente si sigue ahí y, si en la conversación quedó un tema o producto pendiente, si aún le interesa ese tema (menciónelo en pocas palabras). No repita información extensa, no vuelva a saludar con un "hola" largo, no invente datos ni horarios. Formato WhatsApp (sin markdown de títulos). Responda ÚNICAMENTE con el mensaje para el cliente.';
+    const messages = [
+      { role: 'system', content: sys },
+      ...prev.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '').slice(0, 800) })),
+    ];
+    const completion = await openai.chat.completions.create({ model: runtime.model, messages, max_tokens: 120, temperature: 0.6 });
+    const out = (completion.choices?.[0]?.message?.content || '').trim();
+    return out || fallback;
+  } catch (e) {
+    console.warn('⏰ No se pudo redactar el recordatorio:', e.message);
+    return fallback;
+  }
 }
 
 
@@ -1441,6 +1508,9 @@ app.post('/webhook', async (req, res) => {
 
     if (!chatId || fromMe || !permitido) return;
 
+    // ⏰ El cliente escribió: cancelamos cualquier recordatorio de inactividad pendiente
+    cancelarNudge(chatId);
+
     // 🚫 Número/chat en la lista de ignorados: no respondemos
     if (estaIgnorado(chatId)) {
       console.log(`🚫 Ignorado (en lista): ${chatId}`);
@@ -1487,6 +1557,7 @@ app.post('/webhook', async (req, res) => {
           await sendWhatsApp(chatId, reply);
           state.messagesHandled++;
           console.log(`🤖 Bot: ${reply}\n`);
+          programarNudge(chatId);
           return;
         }
         if (type === 'ptt' || type === 'audio' || mt.startsWith('audio/')) {
@@ -1499,6 +1570,7 @@ app.post('/webhook', async (req, res) => {
           await sendWhatsApp(chatId, reply);
           state.messagesHandled++;
           console.log(`🤖 Bot: ${reply}\n`);
+          programarNudge(chatId);
           return;
         }
         await sendWhatsApp(chatId, '🤖 Puedo leer texto, imágenes y audios. Ese tipo de archivo todavía no lo proceso.');
@@ -1563,6 +1635,8 @@ app.post('/webhook', async (req, res) => {
       console.log(`🤖 Bot: ${reply}\n`);
     }
     state.messagesHandled++;
+    // ⏰ Programamos el recordatorio de inactividad (si el cliente no vuelve a escribir)
+    programarNudge(chatId);
   } catch (err) {
     console.error('⚠️  Error procesando webhook:', err.message);
   }
@@ -1742,6 +1816,8 @@ app.post('/api/admin/config', authAdmin, async (req, res) => {
     if (updates.RESPONSE_DELAY_MAX !== undefined) runtime.delayMax = parseFloat(updates.RESPONSE_DELAY_MAX) || 0;
     if (updates.SHOW_TYPING !== undefined) runtime.showTyping = updates.SHOW_TYPING === 'true';
     if (updates.STRICT_MODE !== undefined) runtime.strict = updates.STRICT_MODE === 'true';
+    if (updates.ENABLE_NUDGE !== undefined) runtime.enableNudge = updates.ENABLE_NUDGE === 'true';
+    if (updates.NUDGE_SECONDS !== undefined) runtime.nudgeSeconds = parseInt(updates.NUDGE_SECONDS, 10) || runtime.nudgeSeconds;
     if (updates.ENABLE_CALENDAR !== undefined) runtime.enableCalendar = updates.ENABLE_CALENDAR === 'true';
     if (['GOOGLE_CALENDAR_ID', 'GOOGLE_CALENDAR_TIMEZONE', 'GOOGLE_MEET_LINK'].some(k => updates[k] !== undefined)) configurarCalendario();
     if (updates.ENABLE_SMTP !== undefined) runtime.enableSmtp = updates.ENABLE_SMTP === 'true';
@@ -2120,6 +2196,7 @@ let tunnelProc = null;
   console.log(`✉️  Correo SMTP: ${runtime.enableSmtp ? (mailer.disponible() ? 'ACTIVO' : 'activado pero sin host/usuario/clave') : 'desactivado'}`);
   console.log(`🎫 Soporte GLPI: ${runtime.enableGlpi ? (glpi.disponible() ? 'ACTIVO (tickets disponibles)' : 'activado pero sin URL/tokens') : 'desactivado'}`);
   console.log(`🛒 Tienda virtual: ${runtime.enableTienda ? (tienda.disponible() ? 'ACTIVA (' + tienda.conf.url + ')' : 'activada pero sin STORE_URL') : 'desactivada'}`);
+  console.log(`⏰ Recordatorio por inactividad: ${runtime.enableNudge ? 'ACTIVO (' + runtime.nudgeSeconds + 's)' : 'desactivado'}`);
   console.log(`🔧 Herramientas del bot activas: ${herramientasActivas().map((t) => t.function.name).join(', ') || 'NINGUNA'}`);
 
   // Monitor de saldo de OpenAI (alertas por correo + WhatsApp cuando queda poco/se agota)
